@@ -1,0 +1,280 @@
+-- Nuke existing public schema to ensure a clean slate
+DROP SCHEMA IF EXISTS public CASCADE;
+CREATE SCHEMA public;
+
+-- Standard Supabase permissions for the public schema
+GRANT ALL ON SCHEMA public TO postgres;
+GRANT ALL ON SCHEMA public TO public;
+GRANT ALL ON SCHEMA public TO anon;
+GRANT ALL ON SCHEMA public TO authenticated;
+GRANT ALL ON SCHEMA public TO service_role;
+
+-- Enable pgcrypto for gen_random_uuid()
+create extension if not exists pgcrypto;
+
+-- ---------------------------------------------------------
+-- Tables
+-- ---------------------------------------------------------
+
+create table public.restaurants (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid,
+  name text not null,
+  phone text,
+  business_type text,
+  table_count integer not null default 0,
+  short_code text,
+  bank_name text,
+  bank_account_number text,
+  bank_account_name text,
+  logo_url text,
+  base_url text,
+  subscription_status text not null default 'trial',
+  subscription_plan text,
+  subscription_period text,
+  trial_ends_at timestamptz,
+  active_event_id uuid,
+  paystack_reference text,
+  last_payment_at timestamptz,
+  is_accepting_orders boolean not null default true,
+  created_at timestamptz not null default now()
+);
+
+create table public.user_roles (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null,
+  restaurant_id uuid not null references public.restaurants(id) on delete cascade,
+  role text not null default 'staff', -- 'manager', 'staff'
+  created_at timestamptz not null default now(),
+  unique(user_id, restaurant_id)
+);
+
+create table public.staff_invites (
+  id uuid primary key default gen_random_uuid(),
+  restaurant_id uuid not null references public.restaurants(id) on delete cascade,
+  email text not null,
+  role text not null default 'staff',
+  token text not null unique,
+  expires_at timestamptz not null,
+  accepted_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table public.patients (
+  id uuid primary key default gen_random_uuid(),
+  restaurant_id uuid not null references public.restaurants(id) on delete cascade,
+  name text not null,
+  phone text,
+  allergies text[] not null default '{}',
+  chronic_conditions text[] not null default '{}',
+  last_visit timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table public.menu_items (
+  id uuid primary key default gen_random_uuid(),
+  restaurant_id uuid not null references public.restaurants(id) on delete cascade,
+  name text not null,
+  description text,
+  price numeric not null,
+  category text not null,
+  image text,
+  available boolean not null default true,
+  track_inventory boolean not null default false,
+  stock_quantity integer not null default 0,
+  low_stock_threshold integer not null default 10,
+  auto_hide_out_of_stock boolean not null default false,
+  barcode text,
+  batch_number text,
+  expiry_date date,
+  requires_prescription boolean not null default false,
+  pairs_with uuid[] not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table public.events (
+  id uuid primary key default gen_random_uuid(),
+  restaurant_id uuid not null references public.restaurants(id) on delete cascade,
+  name text not null,
+  event_date date,
+  table_count integer not null default 0,
+  tier text not null default 'small',
+  amount numeric not null default 0,
+  payment_status text not null default 'unpaid',
+  paystack_reference text,
+  qr_enabled boolean not null default false,
+  paid_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table public.shifts (
+  id uuid primary key default gen_random_uuid(),
+  restaurant_id uuid not null references public.restaurants(id) on delete cascade,
+  user_id uuid not null,
+  start_time timestamptz not null default now(),
+  end_time timestamptz,
+  start_cash numeric not null default 0,
+  expected_cash numeric,
+  actual_cash numeric,
+  expected_pos numeric,
+  actual_pos numeric,
+  expected_transfers numeric,
+  actual_transfers numeric,
+  status text not null default 'active',
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table public.orders (
+  id uuid primary key default gen_random_uuid(),
+  restaurant_id uuid not null references public.restaurants(id) on delete cascade,
+  short_code text not null,
+  table_number text not null,
+  intent text not null default 'dine-in',
+  status text not null default 'pending',
+  total numeric not null default 0,
+  customer_name text,
+  customer_phone text,
+  payment_status text not null default 'unpaid',
+  payment_screenshot_url text,
+  acknowledged boolean not null default false,
+  staff_id uuid,
+  patient_id uuid references public.patients(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table public.order_items (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references public.orders(id) on delete cascade,
+  menu_item_id uuid,
+  name text not null,
+  qty integer not null,
+  price numeric not null,
+  item_intent text,
+  staff_id uuid
+);
+
+create table public.order_messages (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references public.orders(id) on delete cascade,
+  sender text not null, -- 'customer', 'staff'
+  kind text not null default 'message',
+  body text,
+  payload jsonb,
+  read_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table public.customer_requests (
+  id uuid primary key default gen_random_uuid(),
+  restaurant_id uuid not null references public.restaurants(id) on delete cascade,
+  table_number text,
+  type text not null,
+  message text,
+  name text,
+  phone text,
+  resolved boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+create table public.notifications (
+  id uuid primary key default gen_random_uuid(),
+  restaurant_id uuid not null references public.restaurants(id) on delete cascade,
+  type text not null,
+  title text not null,
+  body text,
+  link text,
+  read boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+create table public.inventory_logs (
+  id uuid primary key default gen_random_uuid(),
+  restaurant_id uuid not null references public.restaurants(id) on delete cascade,
+  menu_item_id uuid not null references public.menu_items(id) on delete cascade,
+  change_qty integer not null,
+  reason text,
+  created_at timestamptz not null default now()
+);
+
+-- ---------------------------------------------------------
+-- Functions & Triggers
+-- ---------------------------------------------------------
+
+create or replace function public.touch_updated_at()
+returns trigger language plpgsql set search_path = public as $$
+begin new.updated_at = now(); return new; end $$;
+
+create trigger touch_menu_items_updated_at before update on public.menu_items for each row execute procedure public.touch_updated_at();
+create trigger touch_events_updated_at before update on public.events for each row execute procedure public.touch_updated_at();
+create trigger touch_orders_updated_at before update on public.orders for each row execute procedure public.touch_updated_at();
+create trigger touch_patients_updated_at before update on public.patients for each row execute procedure public.touch_updated_at();
+create trigger touch_shifts_updated_at before update on public.shifts for each row execute procedure public.touch_updated_at();
+
+create or replace function public.handle_new_user_restaurant()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.restaurants (owner_id, name, table_count, subscription_status, trial_ends_at)
+  values (new.id, coalesce(new.raw_user_meta_data->>'restaurant_name', 'My Business'), 0, 'trial', now() + interval '3 days')
+  on conflict do nothing;
+  return new;
+end $$;
+
+create or replace function public.redeem_staff_invite(_token text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare
+  _inv record;
+  _user_id uuid;
+begin
+  _user_id := auth.uid();
+  if _user_id is null then raise exception 'Not authenticated'; end if;
+  
+  select * into _inv from public.staff_invites where token = _token and accepted_at is null and expires_at > now();
+  if not found then raise exception 'Invalid or expired invite'; end if;
+  
+  insert into public.user_roles (user_id, restaurant_id, role)
+  values (_user_id, _inv.restaurant_id, _inv.role)
+  on conflict (user_id, restaurant_id) do update set role = _inv.role;
+  
+  update public.staff_invites set accepted_at = now() where id = _inv.id;
+  
+  return jsonb_build_object('ok', true, 'restaurant_id', _inv.restaurant_id);
+end $$;
+
+-- ---------------------------------------------------------
+-- Policies (RLS)
+-- ---------------------------------------------------------
+
+alter table public.restaurants enable row level security;
+alter table public.user_roles enable row level security;
+alter table public.staff_invites enable row level security;
+alter table public.patients enable row level security;
+alter table public.menu_items enable row level security;
+alter table public.events enable row level security;
+alter table public.shifts enable row level security;
+alter table public.orders enable row level security;
+alter table public.order_items enable row level security;
+alter table public.order_messages enable row level security;
+alter table public.customer_requests enable row level security;
+alter table public.notifications enable row level security;
+alter table public.inventory_logs enable row level security;
+
+-- Simple permissive policies for now
+create policy "permissive_restaurants" on public.restaurants for all using (true) with check (true);
+create policy "permissive_roles" on public.user_roles for all using (true) with check (true);
+create policy "permissive_invites" on public.staff_invites for all using (true) with check (true);
+create policy "permissive_patients" on public.patients for all using (true) with check (true);
+create policy "permissive_menu" on public.menu_items for all using (true) with check (true);
+create policy "permissive_events" on public.events for all using (true) with check (true);
+create policy "permissive_shifts" on public.shifts for all using (true) with check (true);
+create policy "permissive_orders" on public.orders for all using (true) with check (true);
+create policy "permissive_items" on public.order_items for all using (true) with check (true);
+create policy "permissive_messages" on public.order_messages for all using (true) with check (true);
+create policy "permissive_requests" on public.customer_requests for all using (true) with check (true);
+create policy "permissive_notifications" on public.notifications for all using (true) with check (true);
+create policy "permissive_inventory_logs" on public.inventory_logs for all using (true) with check (true);

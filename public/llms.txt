@@ -1,0 +1,24 @@
+# SmartTable Nigeria
+
+SmartTable is a premium, contactless QR code table-side ordering and menu management SaaS platform engineered specifically for modern restaurants, lounges, cafes, and event caterers across Nigeria.
+
+## Value Proposition
+- **Turn Every Table into a Station**: Guests scan a table's unique QR code to browse a visually rich menu, customize their order preferences, and check out securely in seconds.
+- **Operational Efficiency & Sales Lift**: Slashes customer wait times by up to 40%, boosts average ticket spending by 22% through automated up-selling, and eliminates kitchen communication errors.
+- **Stable Naira Pricing**: Transparent plans billed directly in Naira, insulating your business from volatile foreign exchange rates or costly currency conversions.
+- **Local Support**: Backed by a dedicated 24/7 technical support team based locally in Abuja and Lagos.
+
+## Pricing Plans (Naira-based, No Hidden Fees)
+- **Lite Plan (₦5,000/month)**: Ideal for small local bukkas, food stalls, and quick popups. Supports up to 10 tables, basic QR menu access, and direct digital checkout.
+- **Standard Plan (₦10,000/month)**: Custom-built for growing cafes and dine-in restaurants. Supports up to 30 active tables, custom printed QRs, waitstaff mobile sync, and live order sound alerts.
+- **Enterprise Plan (₦15,000/month)**: Designed for large fine-dining establishments, high-volume lounges, and multi-venue clubs. Supports unlimited active tables, custom multi-menu layouts, live Chef Screen (KDS) panels, priority local account manager support, and detailed Naira revenue analytics.
+
+## Target Audience & Operational Sync
+- **Restaurant Owners**: Track real-time Naira transaction metrics, monitor MRR, reduce overhead staff, and achieve 32% faster table turnover rates.
+- **Waitstaff**: Spend zero energy carrying heavy paper menus or typing orders. Focus entirely on delivering piping-hot meals, managing customer hospitality, and keeping tables clean.
+- **Kitchen & Chef Staff**: Get highly legible digital order tickets instantly on the screen, eliminating order disputes and manual note reading errors during Friday peaks.
+
+## Technical Summary
+- **Zero App Download**: High-speed, responsive, browser-based menu page that opens in 1 second, optimized for slow mobile networks.
+- **Direct Paystack Gate**: Inbuilt secure Paystack checkout supporting direct bank transfers, credit/debit cards, USSD, and Apple Pay.
+- **Developer**: Designed and powered by LightOrb Innovations.

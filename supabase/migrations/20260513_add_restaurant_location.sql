@@ -1,0 +1,5 @@
+ALTER TABLE restaurants 
+ADD COLUMN latitude DOUBLE PRECISION,
+ADD COLUMN longitude DOUBLE PRECISION,
+ADD COLUMN geofencing_enabled BOOLEAN DEFAULT FALSE,
+ADD COLUMN geofencing_radius INTEGER DEFAULT 300; -- in meters
