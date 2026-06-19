@@ -51,6 +51,7 @@
     "cmdk": "^1.1.1",
     "date-fns": "^3.6.0",
     "dexie": "^4.4.4",
+    "dotenv": "^17.4.2",
     "embla-carousel-react": "^8.6.0",
     "firebase": "^12.14.0",
     "html2canvas": "^1.4.1",
