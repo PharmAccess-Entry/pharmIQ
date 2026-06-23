@@ -122,11 +122,19 @@ export default function PurchaseHistory() {
 
       if (itemErr) throw itemErr;
 
-      // 5. Update menu_items aggregate stock (cached value)
-      const { data: aggregate } = await supabase.from("product_batches").select("stock_quantity").eq("menu_item_id", menuItemId);
-      const totalStock = aggregate?.reduce((acc, b) => acc + (b.stock_quantity || 0), 0) || 0;
-
-      await supabase.from("menu_items").update({ stock_quantity: totalStock }).eq("id", menuItemId);
+      // 5. Add received quantity to menu_items using the RPC so that:
+      //    a) the change is atomic and logged correctly in inventory_logs
+      //    b) any pre-existing stock set manually (without a batch record) is NOT destroyed
+      await supabase.rpc("update_stock_with_reason", {
+        p_restaurant_id: rid,
+        p_menu_item_id: menuItemId,
+        p_change_qty: q,
+        p_reason: "purchase",
+        p_movement_type: "receiving",
+        p_note: `Received batch ${batchNumber || batch.id} from supplier`,
+        p_reference_id: receiving.id,
+        p_reference_type: "stock_receiving",
+      });
 
       toast.success("Stock received successfully!");
       setReceiveModalOpen(false);

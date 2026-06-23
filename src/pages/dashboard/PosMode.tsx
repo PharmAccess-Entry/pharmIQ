@@ -276,6 +276,7 @@ export default function PosMode() {
   const [orderIntent, setOrderIntent] = useState<"takeaway" | "dine-in" | "mixed">("takeaway");
   
   const { products: menuItems, isLoading: loading, isOffline, pendingSyncCount, placeOrder: offlinePlaceOrder, syncProductsSnapshot } = useOfflinePos(restaurant?.id, user?.id);
+  const { queueAction } = useOfflineQueue();
   const [cashGivenStr, setCashGivenStr] = useState<string>("");
   const cashGiven = parseInt(cashGivenStr.replace(/,/g, "")) || 0;
   const [placing, setPlacing] = useState(false);

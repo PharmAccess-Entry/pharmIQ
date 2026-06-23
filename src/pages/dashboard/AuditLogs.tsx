@@ -28,49 +28,68 @@ export default function AuditLogs() {
   const fetchLogs = async () => {
     if (!restaurant?.id) return;
     setLoading(true);
-    const { data: auditData, error } = await supabase
-      .from("audit_logs")
-      .select("*")
-      .eq("restaurant_id", restaurant.id)
-      .order("created_at", { ascending: false })
-      .limit(100);
+    try {
+      const { data: auditData, error } = await supabase
+        .from("audit_logs")
+        .select("*")
+        .eq("restaurant_id", restaurant.id)
+        .order("created_at", { ascending: false })
+        .limit(100);
 
-    if (error) {
-      console.error(error);
-      setLoading(false);
-      return;
-    }
+      if (error) {
+        console.error("Audit Logs Error:", error);
+      }
 
-    let enrichedLogs = auditData as AuditLog[];
-    
-    if (enrichedLogs.length > 0) {
-      const userIds = Array.from(new Set(enrichedLogs.map(l => l.user_id).filter(Boolean))) as string[];
-      if (userIds.length > 0) {
-        const { data: users } = await supabase.rpc("get_users_by_ids", { user_ids: userIds });
-        if (users) {
-          enrichedLogs = enrichedLogs.map(log => {
-            const u = users.find((u: any) => u.id === log.user_id);
-            return { ...log, user_name: u?.full_name || u?.email || "Unknown User" };
-          });
+      let enrichedLogs = (auditData as AuditLog[]) || [];
+      
+      if (enrichedLogs.length > 0) {
+        const userIds = Array.from(new Set(enrichedLogs.map(l => l.user_id).filter(Boolean))) as string[];
+        if (userIds.length > 0) {
+          const { data: users } = await supabase.rpc("get_users_by_ids", { user_ids: userIds });
+          if (users) {
+            enrichedLogs = enrichedLogs.map(log => {
+              const u = users.find((u: any) => u.id === log.user_id);
+              return { ...log, user_name: u?.full_name || u?.email || "Unknown User" };
+            });
+          }
         }
       }
+
+      setLogs(enrichedLogs);
+
+      // Fetch Inventory Ledger (fixed to not query non-existent profiles table)
+      const { data: invData, error: invError } = await supabase
+        .from("inventory_logs")
+        .select("*, menu_items(name)")
+        .eq("restaurant_id", restaurant.id)
+        .order("created_at", { ascending: false })
+        .limit(100);
+
+      if (invError) {
+        console.error("Inventory Logs Error:", invError);
+      }
+
+      let enrichedInvLogs = invData || [];
+      
+      if (enrichedInvLogs.length > 0) {
+        const invUserIds = Array.from(new Set(enrichedInvLogs.map(l => l.user_id).filter(Boolean))) as string[];
+        if (invUserIds.length > 0) {
+          const { data: invUsers } = await supabase.rpc("get_users_by_ids", { user_ids: invUserIds });
+          if (invUsers) {
+            enrichedInvLogs = enrichedInvLogs.map(log => {
+              const u = invUsers.find((u: any) => u.id === log.user_id);
+              return { ...log, user_name: u?.full_name || u?.email || "Unknown User" };
+            });
+          }
+        }
+      }
+
+      setInventoryLogs(enrichedInvLogs);
+    } catch (e) {
+      console.error("Unhandled error fetching logs:", e);
+    } finally {
+      setLoading(false);
     }
-
-    setLogs(enrichedLogs);
-
-    // Fetch Inventory Ledger
-    const { data: invData, error: invError } = await supabase
-      .from("inventory_logs")
-      .select("*, menu_items(name), profiles!inventory_logs_user_id_fkey(full_name)")
-      .eq("restaurant_id", restaurant.id)
-      .order("created_at", { ascending: false })
-      .limit(100);
-
-    if (!invError && invData) {
-      setInventoryLogs(invData);
-    }
-
-    setLoading(false);
   };
 
   useEffect(() => {
@@ -124,7 +143,7 @@ export default function AuditLogs() {
                             {log.menu_items?.name || "Unknown"}
                           </td>
                           <td className="px-6 py-4 font-medium">
-                            {log.profiles?.full_name || "System"}
+                            {log.user_name || "System"}
                           </td>
                           <td className="px-6 py-4">
                             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary capitalize">

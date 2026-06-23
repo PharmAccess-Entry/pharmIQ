@@ -193,7 +193,7 @@ export const OrderDetail = () => {
       return;
     }
 
-    setOrder({ ...order, status: "refunded", payment_status: "refunded" });
+    setOrder({ ...order, status: "refunded" });
     setRefundingOrder(false);
     toast.success("Order refunded successfully" + (restockInventory ? " and inventory restocked." : "."));
   };

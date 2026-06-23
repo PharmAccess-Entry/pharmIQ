@@ -151,8 +151,8 @@ const MenuManagement = () => {
       ...list.map((i) => i.category)
     ]));
 
-    // Filter out old restaurant categories since we are a pharmacy now
-    rawCategories = rawCategories.filter(cat => !legacyCategories.includes(cat));
+    // Filter out old restaurant categories since we are a pharmacy now, unless there are active products in them
+    rawCategories = rawCategories.filter(cat => !legacyCategories.includes(cat) || list.some(i => i.category === cat));
 
     if (restaurant?.category_order && restaurant.category_order.length > 0) {
       rawCategories.sort((a, b) => {
@@ -247,7 +247,7 @@ const MenuManagement = () => {
   };
 
   const openAdd = (cat?: string) => {
-    setForm(empty(cat || categories[0] || "Local Dishes"));
+    setForm(empty(cat || categories[0] || (isPharmacy ? "Medicines" : "Local Dishes")));
     setModalOpen(true);
   };
 
@@ -329,8 +329,23 @@ const MenuManagement = () => {
     if (form.id) {
       setItems((prev) => prev.map((item) => item.id === form.id ? { ...item, ...payload, restaurant_id: rid } as MenuItem : item));
     } else if (data?.[0]) {
-      setItems((prev) => [data[0], ...prev]);
-      setCategories((prev) => prev.includes(data[0].category) ? prev : [...prev, data[0].category]);
+      const newItem = data[0];
+      setItems((prev) => [newItem, ...prev]);
+      setCategories((prev) => prev.includes(newItem.category) ? prev : [...prev, newItem.category]);
+
+      // In pharmacy mode, seed a product_batches record so stock is batch-tracked from day 1.
+      // Without this, a future stock receive would compute the batch-only aggregate and
+      // silently overwrite (destroy) whatever stock was set here on the product.
+      if (isPharmacy && newItem.track_inventory && (newItem.stock_quantity ?? 0) > 0) {
+        await supabase.from("product_batches").insert({
+          menu_item_id: newItem.id,
+          batch_number: form.batch_number.trim() || `INIT-${Date.now().toString().slice(-6)}`,
+          expiry_date: form.expiry_date || null,
+          cost_price: Number(form.cost_price || 0),
+          stock_quantity: newItem.stock_quantity,
+          supplier_id: null,
+        });
+      }
     }
     toast.success(form.id ? (isPharmacy ? "Product updated" : "Item updated") : (isPharmacy ? "Product added" : "Item added"));
     setModalOpen(false);
@@ -640,7 +655,7 @@ const MenuManagement = () => {
                   >
                     <button onClick={() => startRename(c)} className="hover:text-primary">{c}</button>
                     <span className="text-[10px] text-muted-foreground">{count}</span>
-                    {c.toLowerCase().includes("soup") && c.toLowerCase().includes("swallow") && count > 0 && (
+                    {!isPharmacy && c.toLowerCase().includes("soup") && c.toLowerCase().includes("swallow") && count > 0 && (
                       <button onClick={() => smartSplit(c)} title="Split into Soup & Swallow categories"
                         className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all">
                         <Sparkles className="h-2.5 w-2.5" />
@@ -656,7 +671,7 @@ const MenuManagement = () => {
               })}
             </div>
             <div className="flex gap-2 mt-4">
-              <Input value={newCat} onChange={(e) => setNewCat(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addCategory()} placeholder="e.g. Grills, Continental..." className="h-9" />
+              <Input value={newCat} onChange={(e) => setNewCat(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addCategory()} placeholder={isPharmacy ? "e.g. Antibiotics, Painkillers..." : "e.g. Grills, Continental..."} className="h-9" />
               <Button onClick={addCategory} variant="outline" className="shrink-0"><FolderPlus className="h-4 w-4" />Add</Button>
             </div>
           </div>
