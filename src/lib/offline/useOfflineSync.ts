@@ -53,10 +53,11 @@ export const useOfflineSync = () => {
             p_payment_status: p.payment_status,
             p_total: p.total,
             p_customer_name: p.customer_name,
-            p_patient_id: p.patient_id,
+            p_patient_id: p.patient_id === "" ? null : p.patient_id,
             p_cash_given: p.cash_given,
             p_intent: p.intent,
-            p_items: p.order_items // array of pharmacy_order_item
+            p_items: p.order_items, // array of pharmacy_order_item
+            p_shift_id: p.shift_id || null
           });
           
           if (error) throw error;
@@ -68,6 +69,14 @@ export const useOfflineSync = () => {
         else if (item.type === 'REFUND_CREATE') {
            // handled via RPC or existing mechanism
         }
+        else if (item.type === 'SHIFT_CREATE') {
+            const { error } = await supabase.from('shifts').insert(item.payload);
+            if (error) throw error;
+        }
+        else if (item.type === 'SHIFT_CLOSE') {
+            const { error } = await supabase.from('shifts').update(item.payload.data).eq('id', item.payload.id);
+            if (error) throw error;
+        }
 
         // Successfully synced, remove from queue
         await db.offline_queue.delete(item.id);
@@ -78,6 +87,10 @@ export const useOfflineSync = () => {
           status: 'failed', 
           error_message: err.message || 'Unknown error'
         });
+        
+        if (item.attempts >= 3) {
+           toast.error(`Sync failed: ${err.message || 'Unknown error'}. Click "pending" to clear queue.`);
+        }
         
         // Stop current batch if we hit a failure to preserve order and retry later
         break; 
@@ -105,6 +118,12 @@ export const useOfflineSync = () => {
         // Refetch state logic can be hooked into custom events
         window.dispatchEvent(new CustomEvent('pharmiq_sync_complete'));
     }
+  };
+
+  const clearQueue = async () => {
+    await db.offline_queue.clear();
+    setQueueSize(0);
+    toast.success("Offline queue cleared");
   };
 
   useEffect(() => {
@@ -147,6 +166,7 @@ export const useOfflineSync = () => {
     isSyncing,
     queueSize,
     lastSyncTime,
-    triggerSync: processSync
+    triggerSync: processSync,
+    clearQueue
   };
 };

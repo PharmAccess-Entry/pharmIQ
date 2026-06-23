@@ -5,6 +5,8 @@ import { useRestaurant } from "@/lib/restaurant";
 import { format } from "date-fns";
 import { ShieldAlert, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ArrowUp, ArrowDown } from "lucide-react";
 
 type AuditLog = {
   id: string;
@@ -20,6 +22,7 @@ type AuditLog = {
 export default function AuditLogs() {
   const { restaurant } = useRestaurant();
   const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [inventoryLogs, setInventoryLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchLogs = async () => {
@@ -54,6 +57,19 @@ export default function AuditLogs() {
     }
 
     setLogs(enrichedLogs);
+
+    // Fetch Inventory Ledger
+    const { data: invData, error: invError } = await supabase
+      .from("inventory_logs")
+      .select("*, menu_items(name), profiles!inventory_logs_user_id_fkey(full_name)")
+      .eq("restaurant_id", restaurant.id)
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    if (!invError && invData) {
+      setInventoryLogs(invData);
+    }
+
     setLoading(false);
   };
 
@@ -75,48 +91,126 @@ export default function AuditLogs() {
         </Button>
       </div>
 
-      <div className="bg-card border border-border shadow-soft rounded-2xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
-            <thead className="bg-muted/50 text-xs uppercase font-semibold text-muted-foreground">
-              <tr>
-                <th className="px-6 py-4">Timestamp</th>
-                <th className="px-6 py-4">User</th>
-                <th className="px-6 py-4">Action</th>
-                <th className="px-6 py-4">Details</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {logs.length > 0 ? (
-                logs.map((log) => (
-                  <tr key={log.id} className="hover:bg-muted/30 transition-colors">
-                    <td className="px-6 py-4 whitespace-nowrap text-muted-foreground">
-                      {format(new Date(log.created_at), "MMM d, yyyy h:mm a")}
-                    </td>
-                    <td className="px-6 py-4 font-medium">
-                      {log.user_name || "System"}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary capitalize">
-                        {log.action.replace(/_/g, " ")}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-muted-foreground max-w-xs truncate" title={JSON.stringify(log.details)}>
-                      {log.details ? JSON.stringify(log.details) : "—"}
-                    </td>
+      <Tabs defaultValue="inventory" className="w-full">
+        <TabsList className="mb-4">
+          <TabsTrigger value="inventory">Inventory Ledger</TabsTrigger>
+          <TabsTrigger value="system">System Audit</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="inventory" className="mt-0">
+          <div className="bg-card border border-border shadow-soft rounded-2xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap">
+                <thead className="bg-muted/50 text-xs uppercase font-semibold text-muted-foreground">
+                  <tr>
+                    <th className="px-6 py-4">Timestamp</th>
+                    <th className="px-6 py-4">Product</th>
+                    <th className="px-6 py-4">User</th>
+                    <th className="px-6 py-4">Movement</th>
+                    <th className="px-6 py-4">Quantity</th>
+                    <th className="px-6 py-4">Reason & Notes</th>
                   </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={4} className="px-6 py-12 text-center text-muted-foreground">
-                    {loading ? "Loading logs..." : "No audit logs found."}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {inventoryLogs.length > 0 ? (
+                    inventoryLogs.map((log) => {
+                      const isPositive = log.change_qty > 0;
+                      return (
+                        <tr key={log.id} className="hover:bg-muted/30 transition-colors">
+                          <td className="px-6 py-4 whitespace-nowrap text-muted-foreground">
+                            {format(new Date(log.created_at), "MMM d, yyyy h:mm a")}
+                          </td>
+                          <td className="px-6 py-4 font-medium">
+                            {log.menu_items?.name || "Unknown"}
+                          </td>
+                          <td className="px-6 py-4 font-medium">
+                            {log.profiles?.full_name || "System"}
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary capitalize">
+                              {log.movement_type || "Legacy"}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`font-bold flex items-center gap-1 ${isPositive ? 'text-emerald-500' : 'text-destructive'}`}>
+                              {isPositive ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />}
+                              {Math.abs(log.change_qty)}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="text-sm font-medium">{log.reason || "—"}</div>
+                            {log.note && <div className="text-xs text-muted-foreground truncate max-w-xs">{log.note}</div>}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
+                        {loading ? "Loading ledger..." : "No inventory movements found."}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="system" className="mt-0">
+          <div className="bg-card border border-border shadow-soft rounded-2xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap">
+                <thead className="bg-muted/50 text-xs uppercase font-semibold text-muted-foreground">
+                  <tr>
+                    <th className="px-6 py-4">Timestamp</th>
+                    <th className="px-6 py-4">User</th>
+                    <th className="px-6 py-4">Action</th>
+                    <th className="px-6 py-4">Details</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {logs.length > 0 ? (
+                    logs.map((log) => (
+                      <tr key={log.id} className="hover:bg-muted/30 transition-colors">
+                        <td className="px-6 py-4 whitespace-nowrap text-muted-foreground">
+                          {format(new Date(log.created_at), "MMM d, yyyy h:mm a")}
+                        </td>
+                        <td className="px-6 py-4 font-medium">
+                          {log.user_name || "System"}
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary capitalize">
+                            {log.action.replace(/_/g, " ")}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 max-w-xs">
+                          {log.details && typeof log.details === "object" ? (
+                            <div className="flex flex-wrap gap-1">
+                              {Object.entries(log.details).slice(0, 4).map(([k, v]) => (
+                                <span key={k} className="inline-flex items-center gap-1 text-[11px] bg-secondary border border-border rounded-md px-1.5 py-0.5 text-foreground">
+                                  <span className="text-muted-foreground font-medium capitalize">{k.replace(/_/g, " ")}:</span>
+                                  <span className="font-semibold truncate max-w-[80px]" title={String(v)}>{String(v)}</span>
+                                </span>
+                              ))}
+                            </div>
+                          ) : <span className="text-muted-foreground">—</span>}
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={4} className="px-6 py-12 text-center text-muted-foreground">
+                        {loading ? "Loading logs..." : "No audit logs found."}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </TabsContent>
+      </Tabs>
     </DashboardLayout>
   );
 }

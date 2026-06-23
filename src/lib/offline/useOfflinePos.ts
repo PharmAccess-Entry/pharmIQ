@@ -69,13 +69,15 @@ export function useOfflinePos(restaurantId: string | undefined, userId: string |
   // Watch pending sync count
   useEffect(() => {
     const updateCount = async () => {
-      const count = await db.syncQueue.where('status').anyOf('pending', 'failed').count();
-      setPendingSyncCount(count);
+      try {
+        const count = await db.offline_queue.where('status').anyOf('pending', 'failed').count();
+        setPendingSyncCount(count);
+      } catch (err) {
+        // ignore
+      }
     };
 
     updateCount();
-    
-    // Listen to changes in syncQueue (Dexie doesn't have live query natively without dexie-react-hooks, but we can poll or hook into events)
     const interval = setInterval(updateCount, 5000);
     return () => clearInterval(interval);
   }, []);
@@ -86,12 +88,13 @@ export function useOfflinePos(restaurantId: string | undefined, userId: string |
     loadLocalProducts().then(() => {
       if (!isOffline) {
         syncProductsSnapshot();
-        triggerSync(); // kick off any pending syncs
+        // Trigger a sync via custom event so useOfflineSync can pick it up
+        window.dispatchEvent(new CustomEvent('pharmiq_offline_action_queued'));
       }
     });
   }, [restaurantId, isOffline, loadLocalProducts, syncProductsSnapshot]);
 
-  const placeOrder = async (cart: any[], paymentMethod: string, total: number, customerName?: string, cashGiven?: number, patientId?: string) => {
+  const placeOrder = async (cart: any[], paymentMethod: string, total: number, customerName?: string, cashGiven?: number, patientId?: string, shiftId?: string) => {
     if (!restaurantId || !userId) throw new Error("Missing context");
 
     const shortCode = Math.floor(1000 + Math.random() * 9000).toString();
@@ -104,14 +107,15 @@ export function useOfflinePos(restaurantId: string | undefined, userId: string |
       user_id: userId,
       short_code: shortCode,
       table_number: 'Walk-in',
-      status: 'completed',
-      payment_status: paymentMethod === 'cash' ? 'cash_paid' : 'pos_paid',
+      status: paymentMethod === 'bank_transfer' ? 'served' : 'completed',
+      payment_status: paymentMethod === 'cash' ? 'cash_paid' : paymentMethod === 'bank_transfer' ? 'unpaid' : 'pos_paid',
       total,
       created_at: nowStr,
       customer_name: customerName,
-      patient_id: patientId,
+      patient_id: patientId || null, // Must be null not empty string for UUID column
       cash_given: cashGiven,
       intent: 'take-away',
+      shift_id: shiftId || null,
       order_items: cart.map(item => ({
         menu_item_id: item.id,
         name: item.name,

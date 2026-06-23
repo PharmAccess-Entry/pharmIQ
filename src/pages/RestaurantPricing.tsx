@@ -13,9 +13,9 @@ type Mode = "restaurant" | "event";
 const pricingSchema = {
   "@context": "https://schema.org",
   "@type": "WebPage",
-  "name": "PharmIQ Nigeria Pricing — ₦2,000 per table/month",
+  "name": "PharmIQ Nigeria Pricing — ₦2,000 per register/month",
   "url": "https://getpharmiq.com/pricing",
-  "description": "Affordable pharmacy POS plans for Nigerian pharmacies and event centers. Starting from ₦2,000 per table per month. Created by Olatunbosun Oluwafemi, LightOrb Innovations.",
+  "description": "Affordable pharmacy POS plans for Nigerian pharmacies and event centers. Starting from ₦2,000 per register per month. Created by Olatunbosun Oluwafemi, LightOrb Innovations.",
   "mainEntity": {
     "@type": "Product",
     "name": "PharmIQ QR Ordering System",
@@ -31,7 +31,7 @@ const pricingSchema = {
 };
 
 const features = [
-  { icon: QrCode,          label: "Custom QR codes for every table" },
+  { icon: QrCode,          label: "Custom QR codes for every register" },
   { icon: Zap,             label: "Real-time kitchen sync" },
   { icon: BarChart3,       label: "Full analytics & insights" },
   { icon: Shield,          label: "Secure Paystack payments" },
@@ -50,12 +50,12 @@ const Pricing = () => {
   return (
     <div className="min-h-screen flex flex-col">
       <Helmet>
-        <title>PharmIQ Pricing Nigeria — ₦2,000/table | LightOrb Innovations</title>
-        <meta name="description" content="Transparent, affordable pricing for PharmIQ Nigeria. Pay ₦2,000 per table per month. No contracts, no setup fees. Built by Olatunbosun Oluwafemi of LightOrb Innovations. Start your 3-day free trial today." />
+        <title>PharmIQ Pricing Nigeria — ₦2,000/register | LightOrb Innovations</title>
+        <meta name="description" content="Transparent, affordable pricing for PharmIQ Nigeria. Pay ₦2,000 per register per month. No contracts, no setup fees. Built by Olatunbosun Oluwafemi of LightOrb Innovations. Start your 3-day free trial today." />
         <meta name="keywords" content="PharmIQ pricing Nigeria, pharmacy POS cost Nigeria, affordable pharmacy software Nigeria, Olatunbosun Oluwafemi, LightOrb Innovations" />
         <link rel="canonical" href="https://getpharmiq.com/pricing" />
-        <meta property="og:title" content="PharmIQ Pricing — ₦2,000/table | Nigeria's Most Affordable QR System" />
-        <meta property="og:description" content="Pay only for what you use. ₦2,000 per table per month. No setup fees. 3-day free trial." />
+        <meta property="og:title" content="PharmIQ Pricing — ₦2,000/register | Nigeria's Most Affordable QR System" />
+        <meta property="og:description" content="Pay only for what you use. ₦2,000 per register per month. No setup fees. 3-day free trial." />
         <meta property="og:url" content="https://getpharmiq.com/pricing" />
         <script type="application/ld+json">{JSON.stringify(pricingSchema)}</script>
       </Helmet>
@@ -127,18 +127,18 @@ const Pricing = () => {
               {/* Main Pricing Card */}
               <div className="relative bg-card rounded-3xl border-2 border-primary shadow-glow p-8 sm:p-12 max-w-2xl mx-auto hover-lift">
                 <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-gradient-hero text-primary-foreground text-xs font-bold px-5 py-2 rounded-full whitespace-nowrap shadow-glow">
-                  ✦ Pay only for your tables
+                  ✦ Pay only for your registers
                 </div>
 
                 <div className="text-center mb-10">
-                  <h2 className="font-display text-2xl font-bold mb-2">Interactive Table Pricing</h2>
+                  <h2 className="font-display text-2xl font-bold mb-2">Interactive Register Pricing</h2>
                   <p className="text-muted-foreground text-sm">Drag the slider — your price adjusts in real time.</p>
                 </div>
 
                 {/* Slider */}
                 <div className="mb-8">
                   <div className="flex justify-between items-end mb-3">
-                    <span className="text-sm font-semibold text-muted-foreground">Number of Tables</span>
+                    <span className="text-sm font-semibold text-muted-foreground">Number of Registers</span>
                     <span className="font-display text-5xl font-black text-primary tabular-nums">{tableCount}</span>
                   </div>
                   <input
@@ -150,7 +150,7 @@ const Pricing = () => {
                     className="w-full accent-primary h-2 cursor-pointer"
                   />
                   <div className="flex justify-between text-xs text-muted-foreground mt-2 font-medium">
-                    <span>1 table</span><span>100+ tables</span>
+                    <span>1 register</span><span>100+ registers</span>
                   </div>
                 </div>
 
@@ -165,7 +165,7 @@ const Pricing = () => {
                     </span>
                     <span className="text-muted-foreground font-medium">{periodLabel}</span>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-2">= ₦2,000 × {tableCount} table{tableCount !== 1 ? "s" : ""}{cycle === "yearly" ? " × 10 months" : ""}</p>
+                  <p className="text-xs text-muted-foreground mt-2">= ₦2,000 × {tableCount} register{tableCount !== 1 ? "s" : ""}{cycle === "yearly" ? " × 10 months" : ""}</p>
                   {cycle === "yearly" && (
                     <div className="mt-3 inline-flex items-center gap-1.5 bg-success/10 text-success font-bold text-sm px-4 py-2 rounded-full">
                       <Check className="h-4 w-4" />
@@ -176,7 +176,7 @@ const Pricing = () => {
 
                 <Button variant="hero" size="lg" className="w-full text-base font-bold shadow-glow mb-8" asChild>
                   <Link to="/signup?type=restaurant">
-                    Get Started with {tableCount} Table{tableCount !== 1 ? "s" : ""}
+                    Get Started with {tableCount} Register{tableCount !== 1 ? "s" : ""}
                     <ArrowRight className="h-5 w-5 ml-2" />
                   </Link>
                 </Button>
@@ -198,10 +198,10 @@ const Pricing = () => {
               {EVENT_TIERS.map((t, i) => {
                 const popular = t.id === "medium";
                 const eventFeatures = t.id === "small"
-                  ? ["Up to 10 tables", "QR codes per table", "Live request feed", "Pay once per event"]
+                  ? ["Up to 10 registers", "QR codes per register", "Live request feed", "Pay once per event"]
                   : t.id === "medium"
-                  ? ["11–25 tables", "QR codes per table", "Live request feed", "Custom event branding", "Pay once per event"]
-                  : ["26+ tables", "QR codes per table", "Live request feed", "Custom event branding", "Priority support", "Pay once per event"];
+                  ? ["11–25 registers", "QR codes per register", "Live request feed", "Custom event branding", "Pay once per event"]
+                  : ["26+ registers", "QR codes per register", "Live request feed", "Custom event branding", "Priority support", "Pay once per event"];
                 return (
                   <div key={t.id} className="relative animate-fade-up" style={{ animationDelay: `${(i + 1) * 100}ms` }}>
                     {popular && (

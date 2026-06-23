@@ -51,7 +51,7 @@ export default function Reconciliation() {
     try {
       const { data: batchData } = await supabase
         .from("product_batches")
-        .select("id, batch_number, stock_quantity, cost_price, menu_items(name, price)")
+        .select("id, batch_number, stock_quantity, cost_price, menu_item_id, menu_items(name, price)")
         .gt("stock_quantity", 0)
         .order("expiry_date", { ascending: true });
 
@@ -98,7 +98,7 @@ export default function Reconciliation() {
 
       const itemsToInsert = [];
       const batchUpdates = [];
-      const menuUpdates = new Set<string>();
+      const menuIdToVariance: Record<string, number> = {};
 
       for (const batch of batches) {
         const expected = batch.stock_quantity;
@@ -124,7 +124,8 @@ export default function Reconciliation() {
             stock_quantity: actual
           });
 
-          menuUpdates.add(batch.menu_items.id); // Need to recalculate menu_item aggregate
+          const menuId = batch.menu_item_id;
+          menuIdToVariance[menuId] = (menuIdToVariance[menuId] || 0) + variance;
         }
       }
 
@@ -137,8 +138,19 @@ export default function Reconciliation() {
           await supabase.from("product_batches").update({ stock_quantity: update.stock_quantity }).eq("id", update.id);
         }
 
-        // We should trigger a menu_items sync for every affected menu item, but for simplicity we rely on a manual trigger or just update them individually
-        // A robust backend would use a trigger, but we'll do it from client here
+        // Apply variances to menu_items atomically and write to inventory_logs
+        for (const [menuId, variance] of Object.entries(menuIdToVariance)) {
+          await supabase.rpc("update_stock_with_reason", {
+            p_restaurant_id: rid,
+            p_menu_item_id: menuId,
+            p_change_qty: variance,
+            p_reason: "count_correction",
+            p_movement_type: "reconciliation",
+            p_note: "Stock reconciliation audit",
+            p_reference_id: session.id,
+            p_reference_type: "reconciliation",
+          });
+        }
       }
 
       toast.success("Stock reconciliation completed");
@@ -201,7 +213,7 @@ export default function Reconciliation() {
               </div>
             </div>
             <div className="overflow-x-auto p-4">
-              <table className="w-full text-sm text-left">
+              <table className="w-full text-sm text-left [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap">
                 <thead className="bg-secondary/50 text-xs uppercase text-muted-foreground">
                   <tr>
                     <th className="px-5 py-3">Product</th>

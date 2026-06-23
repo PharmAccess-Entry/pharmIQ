@@ -45,7 +45,7 @@ export interface OfflineSale {
 export interface OfflineAction {
   id: string; // uuid
   restaurant_id: string;
-  type: 'SALE_CREATE' | 'REFUND_CREATE' | 'STOCK_UPDATE' | 'EXPENSE_CREATE';
+  type: 'SALE_CREATE' | 'REFUND_CREATE' | 'STOCK_UPDATE' | 'EXPENSE_CREATE' | 'SHIFT_CREATE' | 'SHIFT_CLOSE';
   payload: any;
   status: 'pending' | 'syncing' | 'failed' | 'conflict';
   attempts: number;

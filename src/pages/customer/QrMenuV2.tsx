@@ -996,7 +996,7 @@ const QrMenu = () => {
     setIntentOpen(false);
     setConfirmAction(null);
     setShowSuccess(true);
-    toast.success("Order sent to kitchen 🎉");
+    toast.success("Order sent to pharmacy 🎉");
   };
 
   // True when customer came from "Add More Items" with an active unfulfilled order
@@ -1405,7 +1405,7 @@ const QrMenu = () => {
       meat: { emoji: "🍗", title: "Add Meat & Proteins", subtitle: "Complete your meal" },
       drink: { emoji: "🥤", title: "Add a Drink?", subtitle: "Stay refreshed" },
       snack: { emoji: "🥟", title: "Add a Snack?", subtitle: "Perfect with your drink" },
-      notes: { emoji: "📝", title: "Review & Note", subtitle: "Any special instructions for the kitchen?" },
+      notes: { emoji: "📝", title: "Review & Note", subtitle: "Any special instructions for the pharmacist?" },
     };
     return titles[stage.toLowerCase()] || { 
       emoji: "✨", 
@@ -1436,7 +1436,7 @@ const QrMenu = () => {
         return s || g || "";
       };
       
-      // Main item (swallow/rice): Combine specific root note + global kitchen note
+      // Main item: Combine specific root note + global order note
       const rootNote = combineNotes(pairingItemNotes['root'], pairingNote);
       addToCart(currentSelection, currentQty, "eat-here", soupDisplay, rootNote, bundleId);
       
@@ -1605,7 +1605,7 @@ const QrMenu = () => {
                  activeOrder.status === 'served' ? "Enjoy your meal! 😋" : "Status Update"}
               </h2>
               <p className="text-xs sm:text-sm text-muted-foreground mt-2 font-semibold">
-                {activeOrder.status === 'pending' ? "Kitchen has received your order and is setting up." : 
+                {activeOrder.status === 'pending' ? "Pharmacy has received your order and is setting up." : 
                  activeOrder.status === 'preparing' ? "Chef Ada is currently preparing your delicious meal!" : 
                  "Everything has been served. Enjoy your meal!"}
               </p>
@@ -2402,7 +2402,7 @@ const QrMenu = () => {
             ["🔍", "Browse Choice", "Use the categories or search to find your cravings."],
             ["🛒", "Build Cart", "Tap items to add. Edit quantities directly in the cart."],
             ["🚀", "Order Now", "Place your order and track it live on this page."],
-            ["💬", "Live Status", "See exactly when the kitchen starts and serves your meal."],
+            ["💬", "Live Status", "See exactly when the pharmacy starts and prepares your order."],
             ["🛎️", "Quick Help", "Need anything? Call a waiter with one tap."]
           ].map(([emoji, title, desc]) => (
             <li key={title} className="flex gap-4 p-4 rounded-2xl bg-secondary/30">
@@ -2668,7 +2668,7 @@ const QrMenu = () => {
                   ))}
                 </div>
               <div className="space-y-3">
-                <label className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] ml-2">Kitchen Note</label>
+                <label className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] ml-2">Order Note</label>
                 <Textarea 
                   value={pairingNote} 
                   onChange={(e) => setPairingNote(e.target.value)} 

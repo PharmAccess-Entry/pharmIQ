@@ -11,7 +11,7 @@ export function OfflineBanner() {
   useEffect(() => {
     const updateCount = async () => {
       try {
-        const count = await db.syncQueue.where("status").anyOf("pending", "failed").count();
+        const count = await db.offline_queue.where("status").anyOf("pending", "failed").count();
         setPendingCount(count);
       } catch (err) {
         console.error(err);

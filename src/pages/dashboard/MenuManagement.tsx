@@ -11,6 +11,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { CustomDatePicker } from "@/components/ui/custom-date-picker";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { ImagePlus, Loader2, Tag, X, FolderPlus, Plus, Pencil, Trash2, Sparkles, Check, ArrowRight, Route, GripVertical, Upload, AlertTriangle } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -62,12 +64,15 @@ type FormState = {
   batch_number: string;
   requires_prescription: boolean;
   cost_price: string;
+  unit: string;
 };
+
+const UNIT_OPTIONS = ["Tablet", "Capsule", "Pack", "Bottle", "Vial", "Sachet", "Tube", "ml", "Litre", "Ampule", "Strip", "Piece"];
 
 const empty = (cat: string): FormState => ({
   name: "", description: "", price: "", cost_price: "", category: cat, image: "", available: true, options: "", pairs_with: [],
-  track_inventory: false, stock_quantity: "0", low_stock_threshold: "5", auto_hide_out_of_stock: false,
-  barcode: "", expiry_date: "", batch_number: "", requires_prescription: false
+  track_inventory: false, stock_quantity: "", low_stock_threshold: "5", auto_hide_out_of_stock: false,
+  barcode: "", expiry_date: "", batch_number: "", requires_prescription: false, unit: ""
 });
 
 const compressImage = async (file: File): Promise<File> => {
@@ -123,7 +128,7 @@ const MenuManagement = () => {
   // Price follow-up after adding suggested dishes
   const [priceOpen, setPriceOpen] = useState(false);
   const [priceItems, setPriceItems] = useState<MenuItem[]>([]);
-  const [priceDrafts, setPriceDrafts] = useState<Record<string, string>>({});
+  const [priceDrafts, setPriceDrafts] = useState<Record<string, any>>({});
   const [savingPrices, setSavingPrices] = useState(false);
 
   // Delete confirmation
@@ -139,9 +144,10 @@ const MenuManagement = () => {
     
     const legacyCategories = ["Local Dishes", "Swallow", "Soup", "Proteins", "Pastries", "Drinks", "Intercontinental", "Soups & Swallows", "Small Chops"];
     
+    const baseCategories = restaurant?.category_order ?? defaultCategories;
+
     let rawCategories = Array.from(new Set([
-      ...defaultCategories, 
-      ...(restaurant?.category_order || []),
+      ...baseCategories,
       ...list.map((i) => i.category)
     ]));
 
@@ -258,13 +264,14 @@ const MenuManagement = () => {
       options: (item.options || []).join(", "),
       pairs_with: item.pairs_with || [],
       track_inventory: item.track_inventory || false,
-      stock_quantity: String(item.stock_quantity || 0),
+      stock_quantity: String(item.stock_quantity ?? ""),
       low_stock_threshold: String(item.low_stock_threshold || 5),
       auto_hide_out_of_stock: item.auto_hide_out_of_stock || false,
       barcode: item.barcode || "",
       expiry_date: item.expiry_date || "",
       batch_number: item.batch_number || "",
       requires_prescription: item.requires_prescription || false,
+      unit: (item as any).unit || "",
     });
     setModalOpen(true);
   };
@@ -275,6 +282,19 @@ const MenuManagement = () => {
     const price = (isEvent || isIncluded) ? Number(form.price || 0) : Number(form.price);
     if (!isEvent && !isIncluded && (!price || price < 0)) return toast.error("Enter a valid price");
     if (!form.category) return toast.error("Pick a category");
+    if (isPharmacy && (form.cost_price === "" || Number(form.cost_price) <= 0)) {
+      return toast.error("Cost Price is required — enter the amount you bought this product for");
+    }
+    if (isPharmacy && form.stock_quantity === "") {
+      return toast.error("Opening Stock is required — enter 0 if you have none in stock yet");
+    }
+    if (isPharmacy && !form.unit.trim()) {
+      return toast.error("Unit of Measure is required (e.g. Tablet, Capsule, Pack)");
+    }
+    // Duplicate detection: warn if product name already exists (skip when editing)
+    if (!form.id && items.some(i => i.name.trim().toLowerCase() === form.name.trim().toLowerCase())) {
+      return toast.error(`A product named "${form.name.trim()}" already exists. Edit the existing product instead.`);
+    }
     setSavingItem(true);
     const payload = {
       restaurant_id: rid,
@@ -287,14 +307,15 @@ const MenuManagement = () => {
       available: form.available,
       options: form.options.split(",").map(s => s.trim()).filter(Boolean),
       pairs_with: form.pairs_with || [],
-      track_inventory: form.track_inventory,
-      stock_quantity: form.track_inventory ? Number(form.stock_quantity) || 0 : 0,
-      low_stock_threshold: form.track_inventory ? Number(form.low_stock_threshold) || 5 : 5,
+      track_inventory: isPharmacy ? true : form.track_inventory,
+      stock_quantity: (isPharmacy || form.track_inventory) ? Number(form.stock_quantity) || 0 : 0,
+      low_stock_threshold: (isPharmacy || form.track_inventory) ? Number(form.low_stock_threshold) || 5 : 5,
       auto_hide_out_of_stock: form.auto_hide_out_of_stock,
       barcode: form.barcode.trim() || null,
       expiry_date: form.expiry_date || null,
       batch_number: form.batch_number.trim() || null,
       requires_prescription: form.requires_prescription,
+      unit: isPharmacy ? (form.unit.trim() || null) : null,
     };
     let error;
     let data: MenuItem[] | null = null;
@@ -329,20 +350,58 @@ const MenuManagement = () => {
   };
 
   const saveSuggestionPrices = async () => {
-    const invalid = priceItems.find((item) => !Number(priceDrafts[item.id]) || Number(priceDrafts[item.id]) < 0);
-    if (invalid) return toast.error(`Enter a valid price for ${invalid.name}`);
+    if (isPharmacy) {
+      const missingPrice = priceItems.find(item => !Number(priceDrafts[item.id]?.price) || Number(priceDrafts[item.id]?.price) <= 0);
+      if (missingPrice) return toast.error(`Enter a valid selling price for "${missingPrice.name}"`);
+      const missingCost = priceItems.find(item => !Number(priceDrafts[item.id]?.cost_price) || Number(priceDrafts[item.id]?.cost_price) <= 0);
+      if (missingCost) return toast.error(`Enter a valid cost price for "${missingCost.name}"`);
+      const missingStock = priceItems.find(item => priceDrafts[item.id]?.stock_quantity === "");
+      if (missingStock) return toast.error(`Enter opening stock for "${missingStock.name}" (enter 0 if none in stock)`);
+      const missingUnit = priceItems.find(item => !priceDrafts[item.id]?.unit?.trim());
+      if (missingUnit) return toast.error(`Select a unit of measure for "${missingUnit.name}"`);
+    } else {
+      const invalid = priceItems.find((item) => !Number(priceDrafts[item.id]?.price) || Number(priceDrafts[item.id]?.price) <= 0);
+      if (invalid) return toast.error(`Enter a valid price for ${invalid.name}`);
+    }
+    
     setSavingPrices(true);
-    const updates = await Promise.all(
-      priceItems.map((item) => supabase.from("menu_items").update({ price: Number(priceDrafts[item.id]) }).eq("id", item.id))
-    );
+    
+    const rowsToInsert = priceItems.map((item) => {
+      const { id, ...rest } = item;
+      return {
+        ...rest,
+        price: Number(priceDrafts[item.id]?.price || 0),
+        cost_price: Number(priceDrafts[item.id]?.cost_price || 0),
+        stock_quantity: Number(priceDrafts[item.id]?.stock_quantity || 0),
+        low_stock_threshold: priceDrafts[item.id]?.low_stock_threshold !== "" ? Number(priceDrafts[item.id]?.low_stock_threshold) : 5,
+        track_inventory: true,
+        available: false,  // stays off-shelf until pharmacist confirms ready to sell
+        unit: priceDrafts[item.id]?.unit?.trim() || null,
+        batch_number: priceDrafts[item.id]?.batch_number?.trim() || null,
+        expiry_date: priceDrafts[item.id]?.expiry_date || null,
+        requires_prescription: priceDrafts[item.id]?.requires_prescription ?? false,
+      };
+    });
+
+    const { data, error } = await supabase.from("menu_items").insert(rowsToInsert).select("*");
+    
     setSavingPrices(false);
-    const error = updates.find((result) => result.error)?.error;
     if (error) return toast.error(error.message);
-    setItems((prev) => prev.map((item) => priceDrafts[item.id] ? { ...item, price: Number(priceDrafts[item.id]) } : item));
+    
+    const added = (data as MenuItem[]) || [];
+    setItems((prev) => [...added, ...prev]);
+    
+    const addedCats = [...new Set(added.map((i) => i.category))];
+    setCategories((prev) => {
+      const next = [...prev];
+      addedCats.forEach((c) => { if (!next.includes(c)) next.push(c); });
+      return next;
+    });
+
     setPriceOpen(false);
     setPriceItems([]);
     setPriceDrafts({});
-    toast.success("Prices updated");
+    toast.success(isPharmacy ? `${added.length} product${added.length !== 1 ? 's' : ''} added — toggle "Live" when ready to sell` : "Prices updated");
   };
 
   const addCategory = async () => {
@@ -470,28 +529,20 @@ const MenuManagement = () => {
       toast.error("All selected items already exist in your inventory");
       return;
     }
-    const { data, error } = await supabase.from("menu_items").insert(rows).select("*");
-    setSugSaving(false);
-    if (error) return toast.error(error.message);
-    const added = (data as MenuItem[]) || [];
-    setItems((prev) => [...added, ...prev]);
-    // Update categories list — may have multiple new categories (e.g. from All Categories mode)
-    const addedCats = [...new Set(added.map((i) => i.category))];
-    setCategories((prev) => {
-      const next = [...prev];
-      addedCats.forEach((c) => { if (!next.includes(c)) next.push(c); });
-      return next;
+    
+    const itemsToSetup = rows.map((r, idx) => ({ ...r, id: `draft-${idx}` }));
+    setPriceItems(itemsToSetup as any[]);
+    
+    const initialDrafts: Record<string, any> = {};
+    itemsToSetup.forEach(r => {
+      initialDrafts[r.id] = { price: "", cost_price: "", stock_quantity: "", low_stock_threshold: "", unit: "", batch_number: "", expiry_date: "", requires_prescription: false };
     });
+    setPriceDrafts(initialDrafts);
+    
+    setSugSaving(false);
     setSugOpen(false);
     setSugSelected({});
-    if (!isEvent && added.length) {
-      setPriceItems(added);
-      setPriceDrafts(Object.fromEntries(added.map((item) => [item.id, ""])));
-      setPriceOpen(true);
-      toast.success(`Added ${added.length} item${added.length > 1 ? "s" : ""} — add prices now`);
-    } else {
-      toast.success(`Added ${added.length || rows.length} item${(added.length || rows.length) > 1 ? "s" : ""}`);
-    }
+    setPriceOpen(true);
   };
 
   const startRename = (cat: string) => { setRenaming(cat); setRenameValue(cat); };
@@ -633,7 +684,7 @@ const MenuManagement = () => {
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 sm:gap-4">
                     {catItems.map((item) => (
-                  <div key={item.id} className="bg-card border border-border rounded-2xl shadow-soft overflow-hidden hover:shadow-elevated transition-smooth">
+                  <div key={item.id} className="bg-card border border-border rounded-2xl shadow-soft overflow-hidden hover:shadow-elevated transition-smooth flex flex-col">
                     <div className="aspect-[4/3] bg-secondary relative group cursor-pointer" onClick={() => onPick(item.id)}>
                       {item.image ? (
                         <img src={item.image} alt={item.name} className="w-full h-full object-cover" loading="lazy" />
@@ -650,13 +701,13 @@ const MenuManagement = () => {
                       </div>
                       <input ref={(el) => (inputRefs.current[item.id] = el)} type="file" accept="image/*" className="hidden" onClick={(e) => e.stopPropagation()} onChange={(e) => onFile(item.id, e.target.files?.[0])} />
                     </div>
-                    <div className="p-3 sm:p-4">
+                    <div className="p-3 sm:p-4 flex flex-col flex-1">
                       <div className="flex items-start justify-between gap-2">
-                        <h3 className="font-semibold text-sm leading-tight">{item.name}</h3>
-                        {!isEvent && <span className="font-display font-bold text-primary text-sm whitespace-nowrap">{formatNaira(Number(item.price))}</span>}
+                        <h3 className="font-semibold text-sm leading-tight flex-1 min-w-0 break-words">{item.name}</h3>
+                        {!isEvent && <span className="font-display font-bold text-primary text-sm whitespace-nowrap shrink-0">{formatNaira(Number(item.price))}</span>}
                       </div>
                       <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{item.description}</p>
-                      <div className="flex items-center justify-between gap-2 mt-3 min-w-0">
+                      <div className="flex items-center justify-between gap-2 mt-auto pt-3 min-w-0">
                         <div className="flex items-center gap-1.5 min-w-0 flex-1">
                           <Switch checked={item.available} onCheckedChange={() => toggle(item)} />
                           <span className="text-[10px] text-muted-foreground truncate">{item.available ? "Live" : "Off"}</span>
@@ -717,15 +768,9 @@ const MenuManagement = () => {
                   <div>
                     <Label>Price (₦) {!/soup|stew|sauce/i.test(form.category) && "*"}</Label>
                     <div className="relative">
-                        <Input 
-                          type="text" 
-                          value={form.price ? Number(form.price).toLocaleString("en-NG") : ""} 
-                          onChange={(e) => {
-                            const val = e.target.value.replace(/,/g, "");
-                            if (val === "" || /^\d+$/.test(val)) {
-                              setForm(prev => ({ ...prev, price: val }));
-                            }
-                          }} 
+                        <CurrencyInput 
+                          value={form.price} 
+                          onChange={(val) => setForm(prev => ({ ...prev, price: val }))}
                           placeholder={/soup|stew|sauce/i.test(form.category) ? "0 (Optional)" : "2,500"} 
                           className="mt-1.5" 
                         />
@@ -737,15 +782,9 @@ const MenuManagement = () => {
                   <div>
                     <Label>Cost Price (₦)</Label>
                     <div className="relative">
-                        <Input 
-                          type="text" 
-                          value={form.cost_price ? Number(form.cost_price).toLocaleString("en-NG") : ""} 
-                          onChange={(e) => {
-                            const val = e.target.value.replace(/,/g, "");
-                            if (val === "" || /^\d+$/.test(val)) {
-                              setForm(prev => ({ ...prev, cost_price: val }));
-                            }
-                          }} 
+                        <CurrencyInput 
+                          value={form.cost_price} 
+                          onChange={(val) => setForm(prev => ({ ...prev, cost_price: val }))}
                           placeholder="1,500" 
                           className="mt-1.5" 
                         />
@@ -766,138 +805,47 @@ const MenuManagement = () => {
               </div>
             </div>
 
-            <div>
-              <Label>Selection Options (e.g. Egusi, Okro, Vegetable)</Label>
-              <div className="flex flex-wrap gap-2 mt-2 mb-2">
-                {form.options.split(",").map(opt => opt.trim()).filter(Boolean).map(opt => (
-                  <span key={opt} className="bg-primary/10 text-primary px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1 border border-primary/20">
-                    {opt}
-                    <button type="button" onClick={() => {
-                       const newOpts = form.options.split(",").map(o=>o.trim()).filter(o => o && o !== opt).join(", ");
-                       setForm(prev => ({...prev, options: newOpts}));
-                    }} className="hover:bg-primary/20 rounded-full p-0.5 transition-colors"><X className="h-3 w-3" /></button>
-                  </span>
-                ))}
-              </div>
-              <div className="relative">
-                <Popover open={optionsOpen} onOpenChange={setOptionsOpen}>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full justify-start text-muted-foreground font-normal border-dashed">
-                      <Plus className="h-4 w-4 mr-2" /> Select or add options...
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="p-0 w-[--radix-popover-trigger-width]" align="start">
-                    <Command>
-                      <CommandInput placeholder="Search menu items or type custom..." onValueChange={setOptionSearch} />
-                      <CommandList>
-                        <CommandEmpty className="p-1">
-                          {optionSearch ? (
-                            <Button variant="ghost" className="w-full justify-start text-left px-2 py-1.5 h-auto text-sm" onClick={() => {
-                              const current = form.options.split(",").map(o=>o.trim()).filter(Boolean);
-                              if (!current.includes(optionSearch.trim())) {
-                                setForm(prev => ({...prev, options: [...current, optionSearch.trim()].join(", ")}));
-                              }
-                              setOptionsOpen(false);
-                              setOptionSearch("");
-                            }}>
-                              Add custom: <strong className="ml-1">"{optionSearch}"</strong>
-                            </Button>
-                          ) : <div className="text-sm text-center py-4 text-muted-foreground">Type to search or add</div>}
-                        </CommandEmpty>
-                        <CommandGroup className="max-h-48 overflow-y-auto">
-                          {items.filter(i => !form.options.split(",").map(o=>o.trim()).filter(Boolean).includes(i.name)).map(item => (
-                            <CommandItem key={item.id} onSelect={() => {
-                              const current = form.options.split(",").map(o=>o.trim()).filter(Boolean);
-                              setForm(prev => ({...prev, options: [...current, item.name].join(", ")}));
-                              setOptionsOpen(false);
-                              setOptionSearch("");
-                            }}>
-                              {item.name} <span className="text-muted-foreground ml-2 text-[10px] uppercase tracking-wider">{item.category}</span>
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-1.5">
-                If set, customers must pick one before adding to cart. Perfect for <strong>Soup & Swallow</strong> pairings.
-              </p>
-            </div>
 
-            <div>
-              <Label>Frequently Paired With (Upsell suggestions)</Label>
-              <div className="flex flex-wrap gap-2 mt-2 mb-2">
-                {(form.pairs_with || []).map(pairId => {
-                  const pairedItem = items.find(i => i.id === pairId);
-                  if (!pairedItem) return null;
-                  return (
-                    <span key={pairId} className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1 border border-emerald-500/20">
-                      {pairedItem.name}
-                      <button type="button" onClick={() => {
-                         const newPairs = form.pairs_with.filter(id => id !== pairId);
-                         setForm(prev => ({...prev, pairs_with: newPairs}));
-                      }} className="hover:bg-emerald-500/20 rounded-full p-0.5 transition-colors"><X className="h-3 w-3" /></button>
-                    </span>
-                  );
-                })}
-              </div>
-              <div className="relative">
-                <Popover open={pairsOpen} onOpenChange={setPairsOpen}>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full justify-start text-muted-foreground font-normal border-dashed">
-                      <Plus className="h-4 w-4 mr-2" /> Link pairing items...
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="p-0 w-[--radix-popover-trigger-width]" align="start">
-                    <Command>
-                      <CommandInput placeholder="Search items to pair..." onValueChange={setPairSearch} />
-                      <CommandList>
-                        <CommandEmpty className="p-1">
-                          <div className="text-sm text-center py-4 text-muted-foreground">No matching items</div>
-                        </CommandEmpty>
-                        <CommandGroup className="max-h-48 overflow-y-auto">
-                          {items.filter(i => i.id !== form.id && !(form.pairs_with || []).includes(i.id)).map(item => (
-                            <CommandItem key={item.id} onSelect={() => {
-                              setForm(prev => ({...prev, pairs_with: [...(prev.pairs_with || []), item.id]}));
-                              setPairsOpen(false);
-                              setPairSearch("");
-                            }}>
-                              {item.name} <span className="text-muted-foreground ml-2 text-[10px] uppercase tracking-wider">{item.category}</span>
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-1.5">
-                Items selected here will be recommended to customers as beautiful addon recommendations when they add this item to their cart.
-              </p>
-            </div>
-            
             {/* Inventory Management Section */}
             <div className="pt-4 border-t border-border/50">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h3 className="font-semibold text-sm">Inventory Tracking</h3>
+                  <h3 className="font-semibold text-sm">Inventory Tracking {isPharmacy && <span className="text-[10px] font-bold text-primary uppercase ml-1 bg-primary/10 px-1.5 py-0.5 rounded">Always On</span>}</h3>
                   <p className="text-xs text-muted-foreground mt-0.5">Automatically manage stock levels and get low stock alerts</p>
                 </div>
-                <Switch checked={form.track_inventory} onCheckedChange={(v) => setForm(prev => ({ ...prev, track_inventory: v }))} />
+                {/* Only show toggle for non-pharmacy */}
+                {!isPharmacy && (
+                  <Switch checked={form.track_inventory} onCheckedChange={(v) => setForm(prev => ({ ...prev, track_inventory: v }))} />
+                )}
               </div>
 
-              {form.track_inventory && (
+              {/* Always show for pharmacy; show for others only if toggle is on */}
+              {(isPharmacy || form.track_inventory) && (
                 <div className="grid grid-cols-2 gap-3 p-4 bg-secondary/50 rounded-xl mb-4">
+                  {isPharmacy && (
+                    <div className="col-span-2">
+                      <Label className="text-xs text-muted-foreground">Unit of Measure *</Label>
+                      <Select value={form.unit} onValueChange={(v) => setForm(prev => ({ ...prev, unit: v }))}>
+                        <SelectTrigger className="mt-1.5 h-9 bg-card">
+                          <SelectValue placeholder="Select unit..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {UNIT_OPTIONS.map((u) => (
+                            <SelectItem key={u} value={u}>{u}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
                   <div>
-                    <Label className="text-xs text-muted-foreground">Current Stock</Label>
+                    <Label className="text-xs text-muted-foreground">{isPharmacy ? "Opening Stock *" : "Current Stock"}</Label>
                     <Input 
                       type="number" 
                       min="0"
                       value={form.stock_quantity} 
                       onChange={(e) => setForm(prev => ({ ...prev, stock_quantity: e.target.value }))} 
-                      className="mt-1.5 h-9 bg-card" 
+                      className="mt-1.5 h-9 bg-card"
+                      placeholder={isPharmacy ? "e.g. 50" : "0"}
                     />
                   </div>
                   <div>
@@ -910,14 +858,16 @@ const MenuManagement = () => {
                       className="mt-1.5 h-9 bg-card" 
                     />
                   </div>
-                  <div className="col-span-2 flex items-center justify-between mt-2 pt-2 border-t border-border/50">
-                    <Label className="text-xs font-normal">Auto-hide when out of stock</Label>
-                    <Switch 
-                      checked={form.auto_hide_out_of_stock} 
-                      onCheckedChange={(v) => setForm(prev => ({ ...prev, auto_hide_out_of_stock: v }))} 
-                      className="scale-75 origin-right"
-                    />
-                  </div>
+                  {!isPharmacy && (
+                    <div className="col-span-2 flex items-center justify-between mt-2 pt-2 border-t border-border/50">
+                      <Label className="text-xs font-normal">Auto-hide when out of stock</Label>
+                      <Switch 
+                        checked={form.auto_hide_out_of_stock} 
+                        onCheckedChange={(v) => setForm(prev => ({ ...prev, auto_hide_out_of_stock: v }))} 
+                        className="scale-75 origin-right"
+                      />
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -926,7 +876,7 @@ const MenuManagement = () => {
               <div className="pt-4 border-t border-border/50">
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <h3 className="font-semibold text-sm">Pharmacy Tracking</h3>
+                    <h3 className="font-semibold text-sm">Pharmacy Compliance</h3>
                     <p className="text-xs text-muted-foreground mt-0.5">Manage barcode, expiry, and prescription rules</p>
                   </div>
                 </div>
@@ -941,7 +891,10 @@ const MenuManagement = () => {
                     />
                   </div>
                   <div>
-                    <Label className="text-xs text-muted-foreground">Batch Number</Label>
+                    <Label className="text-xs text-muted-foreground">
+                      Batch Number
+                      {!form.batch_number && <span className="ml-1 text-amber-500 text-[9px] font-bold uppercase">Recommended</span>}
+                    </Label>
                     <Input 
                       value={form.batch_number} 
                       onChange={(e) => setForm(prev => ({ ...prev, batch_number: e.target.value }))} 
@@ -950,14 +903,22 @@ const MenuManagement = () => {
                     />
                   </div>
                   <div>
-                    <Label className="text-xs text-muted-foreground">Expiry Date</Label>
-                    <Input 
-                      type="date"
+                    <Label className="text-xs text-muted-foreground">
+                      Expiry Date
+                      {!form.expiry_date && <span className="ml-1 text-amber-500 text-[9px] font-bold uppercase">Recommended</span>}
+                    </Label>
+                    <CustomDatePicker 
                       value={form.expiry_date} 
-                      onChange={(e) => setForm(prev => ({ ...prev, expiry_date: e.target.value }))} 
-                      className="mt-1.5 h-9 bg-card" 
+                      onChange={(val) => setForm(prev => ({ ...prev, expiry_date: val }))} 
+                      className="mt-1.5 h-9 w-full" 
                     />
                   </div>
+                  {(!form.batch_number || !form.expiry_date) && (
+                    <div className="col-span-2 flex items-start gap-2 text-[11px] text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-2 mt-1">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                      <span>Expiry tracking and recall traceability require a batch number and expiry date. Add them now or edit this product later.</span>
+                    </div>
+                  )}
                   <div className="col-span-2 flex items-center justify-between mt-2 pt-2 border-t border-border/50">
                     <Label className="text-xs font-semibold text-destructive flex items-center gap-1.5">
                       <AlertTriangle className="w-3.5 h-3.5" /> Requires Prescription (Rx)
@@ -971,6 +932,7 @@ const MenuManagement = () => {
                 </div>
               </div>
             )}
+
 
             <div className="flex items-center justify-between bg-secondary/50 rounded-xl px-3 py-2">
               <div>
@@ -1092,43 +1054,150 @@ const MenuManagement = () => {
       </Dialog>
 
       <Dialog open={priceOpen} onOpenChange={setPriceOpen}>
-        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-xl max-h-[92vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Add prices</DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground mt-1">Set customer-facing prices for the suggested products you just added.</DialogDescription>
+            <DialogTitle>{isPharmacy ? "Setup Inventory & Prices" : "Add prices"}</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground mt-1">
+              {isPharmacy
+                ? "Fill in all required fields for each product before adding to your inventory. Products will be set to Off-Shelf until you toggle them live."
+                : "Set customer-facing prices for the suggested products you just added."}
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="space-y-5 max-h-[62vh] overflow-y-auto px-1 pb-1">
             {priceItems.map((item) => (
-              <div key={item.id} className="grid grid-cols-[1fr_8rem] items-center gap-3">
+              <div key={item.id} className="flex flex-col gap-3 p-3 border rounded-xl bg-muted/20">
                 <div className="min-w-0">
-                  <div className="text-sm font-medium truncate">{item.name}</div>
+                  <div className="text-sm font-semibold truncate">{item.name}</div>
                   <div className="text-[11px] text-muted-foreground truncate">{item.category}</div>
                 </div>
-                <Input
-                  type="text"
-                  inputMode="numeric"
-                  value={priceDrafts[item.id] ? Number(priceDrafts[item.id]).toLocaleString("en-NG") : ""}
-                  onChange={(e) => {
-                    const val = e.target.value.replace(/,/g, "");
-                    if (val === "" || /^\d+$/.test(val)) {
-                      setPriceDrafts((prev) => ({ ...prev, [item.id]: val }));
-                    }
-                  }}
-                  placeholder="2,500"
-                  className="h-9"
-                />
+                {/* Row 1: Prices */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Selling Price *</label>
+                    <Input
+                      type="text" inputMode="numeric"
+                      value={priceDrafts[item.id]?.price ? Number(priceDrafts[item.id]?.price).toLocaleString("en-NG") : ""}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/,/g, "");
+                        if (val === "" || /^\d+$/.test(val)) setPriceDrafts((prev) => ({ ...prev, [item.id]: { ...prev[item.id], price: val } }));
+                      }}
+                      placeholder="2,500" className="h-8 text-xs"
+                    />
+                  </div>
+                  {isPharmacy && (
+                    <div>
+                      <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Cost Price *</label>
+                      <Input
+                        type="text" inputMode="numeric"
+                        value={priceDrafts[item.id]?.cost_price ? Number(priceDrafts[item.id]?.cost_price).toLocaleString("en-NG") : ""}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/,/g, "");
+                          if (val === "" || /^\d+$/.test(val)) setPriceDrafts((prev) => ({ ...prev, [item.id]: { ...prev[item.id], cost_price: val } }));
+                        }}
+                        placeholder="1,800" className="h-8 text-xs"
+                      />
+                    </div>
+                  )}
+                </div>
+                {isPharmacy && (
+                  <>
+                    {/* Row 2: Stock + Unit */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Opening Stock *</label>
+                        <Input
+                          type="text" inputMode="numeric"
+                          value={priceDrafts[item.id]?.stock_quantity || ""}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/,/g, "");
+                            if (val === "" || /^\d+$/.test(val)) setPriceDrafts((prev) => ({ ...prev, [item.id]: { ...prev[item.id], stock_quantity: val } }));
+                          }}
+                          placeholder="50" className="h-8 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Unit *</label>
+                        <Select
+                          value={priceDrafts[item.id]?.unit || ""}
+                          onValueChange={(v) => setPriceDrafts((prev) => ({ ...prev, [item.id]: { ...prev[item.id], unit: v } }))}
+                        >
+                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select..." /></SelectTrigger>
+                          <SelectContent>
+                            {UNIT_OPTIONS.map((u) => <SelectItem key={u} value={u} className="text-xs">{u}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    {/* Row 3: Low stock + Batch */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">Low Stock Alert</label>
+                        <Input
+                          type="text" inputMode="numeric"
+                          value={priceDrafts[item.id]?.low_stock_threshold || ""}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/,/g, "");
+                            if (val === "" || /^\d+$/.test(val)) setPriceDrafts((prev) => ({ ...prev, [item.id]: { ...prev[item.id], low_stock_threshold: val } }));
+                          }}
+                          placeholder="5 (Auto)" className="h-8 text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">
+                          Batch No. <span className="text-amber-500 normal-case font-normal">Recommended</span>
+                        </label>
+                        <Input
+                          value={priceDrafts[item.id]?.batch_number || ""}
+                          onChange={(e) => setPriceDrafts((prev) => ({ ...prev, [item.id]: { ...prev[item.id], batch_number: e.target.value } }))}
+                          placeholder="e.g. BAT-001" className="h-8 text-xs"
+                        />
+                      </div>
+                    </div>
+                    {/* Row 4: Expiry + Rx */}
+                    <div className="grid grid-cols-2 gap-2 items-end">
+                      <div>
+                        <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1 block">
+                          Expiry Date <span className="text-amber-500 normal-case font-normal">Recommended</span>
+                        </label>
+                        <CustomDatePicker
+                          value={priceDrafts[item.id]?.expiry_date || ""}
+                          onChange={(val) => setPriceDrafts((prev) => ({ ...prev, [item.id]: { ...prev[item.id], expiry_date: val } }))}
+                          className="h-8 w-full text-xs"
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-2 bg-destructive/5 border border-destructive/20 rounded-lg px-2 py-1.5 h-8">
+                        <label className="text-[10px] font-semibold text-destructive uppercase tracking-wider flex items-center gap-1">
+                          <AlertTriangle className="h-3 w-3" /> Rx Only
+                        </label>
+                        <Switch
+                          checked={priceDrafts[item.id]?.requires_prescription ?? false}
+                          onCheckedChange={(v) => setPriceDrafts((prev) => ({ ...prev, [item.id]: { ...prev[item.id], requires_prescription: v } }))}
+                          className="scale-75 origin-right"
+                        />
+                      </div>
+                    </div>
+                    {/* Compliance warning if batch/expiry missing */}
+                    {(!priceDrafts[item.id]?.batch_number || !priceDrafts[item.id]?.expiry_date) && (
+                      <div className="flex items-start gap-1.5 text-[10px] text-amber-600 dark:text-amber-400">
+                        <AlertTriangle className="h-3 w-3 shrink-0 mt-0.5" />
+                        <span>No expiry tracking until batch + expiry are added. You can edit this product later.</span>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             ))}
           </div>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="ghost" onClick={() => setPriceOpen(false)}>Skip</Button>
+          <DialogFooter className="gap-2 sm:gap-0 mt-4">
+            <Button variant="ghost" onClick={() => setPriceOpen(false)}>Cancel</Button>
             <Button variant="hero" onClick={saveSuggestionPrices} disabled={savingPrices}>
               {savingPrices ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Save prices
+              Save & Add to Inventory
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>

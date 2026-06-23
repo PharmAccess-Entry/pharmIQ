@@ -144,12 +144,12 @@ export default function Suppliers() {
         {filteredSuppliers.map((s) => (
           <div key={s.id} className="bg-card border border-border rounded-2xl p-5 hover:border-primary/40 transition-all cursor-pointer group" onClick={() => openEdit(s)}>
             <div className="flex items-start justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-lg">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-lg shrink-0">
                   <Building2 className="w-5 h-5" />
                 </div>
-                <div>
-                  <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">{s.name}</h3>
+                <div className="min-w-0">
+                  <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors truncate">{s.name}</h3>
                   <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
                     {s.status === 'active' ? (
                       <span className="flex items-center text-green-600"><CheckCircle2 className="w-3 h-3 mr-1" /> Active</span>
@@ -163,27 +163,27 @@ export default function Suppliers() {
 
             <div className="space-y-2 mt-4 text-sm text-muted-foreground">
               {s.contact_name && (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 overflow-hidden">
                   <User className="w-3.5 h-3.5 shrink-0" />
                   <span className="truncate">{s.contact_name}</span>
                 </div>
               )}
               {s.phone && (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 overflow-hidden">
                   <Phone className="w-3.5 h-3.5 shrink-0" />
                   <span className="truncate">{s.phone}</span>
                 </div>
               )}
               {s.email && (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 overflow-hidden">
                   <Mail className="w-3.5 h-3.5 shrink-0" />
                   <span className="truncate">{s.email}</span>
                 </div>
               )}
               {s.address && (
-                <div className="flex items-center gap-2">
-                  <MapPin className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">{s.address}</span>
+                <div className="flex items-start gap-2">
+                  <MapPin className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span className="line-clamp-2 break-words leading-relaxed">{s.address}</span>
                 </div>
               )}
             </div>

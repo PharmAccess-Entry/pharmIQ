@@ -88,7 +88,7 @@ export const RestaurantProvider = ({ children }: { children: ReactNode }) => {
 
     const doRefresh = async () => {
       // 1. Try owner
-      let { data: rData } = await supabase
+      let { data: rData, error: ownerErr } = await supabase
         .from("restaurants")
         .select("*")
         .eq("owner_id", user.id)
@@ -105,10 +105,23 @@ export const RestaurantProvider = ({ children }: { children: ReactNode }) => {
         setRestaurant(rData as any);
         setRole("owner");
         sessionStorage.setItem("st.role", "owner");
+        localStorage.setItem("pharmiq_cached_restaurant", JSON.stringify(rData));
 
+      } else if (!navigator.onLine && ownerErr) {
+        // Fallback to local cache if completely offline
+        try {
+          const cached = localStorage.getItem("pharmiq_cached_restaurant");
+          if (cached) {
+            setRestaurant(JSON.parse(cached));
+            const rRole = sessionStorage.getItem("st.role") || "staff";
+            setRole(rRole as any);
+            setLoading(false);
+            return;
+          }
+        } catch (e) {}
       } else {
         // 2. Fallback: staff member
-        const { data: roleEntry } = await supabase
+        const { data: roleEntry, error: roleErr } = await supabase
           .from("user_roles")
           .select("restaurant_id, role")
           .eq("user_id", user.id)
@@ -127,78 +140,116 @@ export const RestaurantProvider = ({ children }: { children: ReactNode }) => {
             const resolvedRole = roleEntry.role || "staff";
             setRole(resolvedRole);
             sessionStorage.setItem("st.role", resolvedRole);
+            localStorage.setItem("pharmiq_cached_restaurant", JSON.stringify(r));
             setLoading(false);
             return;
           }
-        }
-
-        // 3. Auto-create if no role and no restaurant
-        const meta = (user.user_metadata as any) || {};
-        const { data: created, error: createErr } = await supabase
-          .from("restaurants")
-          .insert({
-            owner_id: user.id,
-            name: meta.restaurant_name || "My Business",
-            business_type: meta.business_type || "restaurant",
-            table_count: 0,
-            subscription_status: "trial",
-            trial_ends_at: new Date(Date.now() + 3 * 86400_000).toISOString(),
-          })
-          .select("*")
-          .maybeSingle();
-        
-        if (createErr) {
-          console.error("CRITICAL: Failed to auto-create restaurant profile.", createErr);
-        }
-        
-        if (created) {
-          created.name = decodeHtml(created.name);
-          setRestaurant(created as any);
-          setRole("owner");
+        } else if (!navigator.onLine && roleErr) {
+          // Fallback to local cache if offline
           try {
-            const isEvent = created.business_type === "event";
-            await supabase.from("notifications").insert({
-              restaurant_id: created.id,
-              type: "system",
-              title: isEvent ? `Welcome to PharmIQ Events, ${created.name.replace(/&#x27;/g, "'")}! 🎉` : `Welcome to PharmIQ, ${created.name.replace(/&#x27;/g, "'")}! 🎉`,
-              body: isEvent 
-                ? "Set up your event profile, add your menu items, and generate your table QR codes."
-                : "Your 3-day free trial has started. Add your menu, generate QR codes, and start taking orders.",
-              link: "/dashboard",
-            });
-
-            // Trigger welcome email via Edge Function
-            if (user.email) {
-              const welcomeKey = `st.welcome_sent.${user.id}`;
-              if (!localStorage.getItem(welcomeKey)) {
-                localStorage.setItem(welcomeKey, "true");
-                supabase.functions.invoke("send-email", {
-                  body: {
-                    template: "welcome",
-                    to: user.email,
-                    data: {
-                      businessName: created.name,
-                      dashboardUrl: window.location.origin + "/dashboard"
-                    }
-                  }
-                }).then(({ error }) => {
-                  if (error) localStorage.removeItem(welcomeKey);
-                }).catch(err => {
-                  localStorage.removeItem(welcomeKey);
-                  console.error("Failed to send welcome email:", err);
-                });
-              }
+            const cached = localStorage.getItem("pharmiq_cached_restaurant");
+            if (cached) {
+              setRestaurant(JSON.parse(cached));
+              const rRole = sessionStorage.getItem("st.role") || "staff";
+              setRole(rRole as any);
+              setLoading(false);
+              return;
             }
-          } catch { /* noop */ }
+          } catch (e) {}
+        }
+
+        // 3. Auto-create if no role and no restaurant (ONLY IF ONLINE)
+        if (navigator.onLine) {
+          const meta = (user.user_metadata as any) || {};
+          const { data: created, error: createErr } = await supabase
+            .from("restaurants")
+            .insert({
+              owner_id: user.id,
+              name: meta.restaurant_name || "My Business",
+              business_type: meta.business_type || "restaurant",
+              table_count: 0,
+              subscription_status: "trial",
+              trial_ends_at: new Date(Date.now() + 3 * 86400_000).toISOString(),
+            })
+            .select("*")
+            .maybeSingle();
+          
+          if (createErr) {
+            console.error("CRITICAL: Failed to auto-create restaurant profile.", createErr);
+          }
+          
+          if (created) {
+            created.name = decodeHtml(created.name);
+            setRestaurant(created as any);
+            setRole("owner");
+            localStorage.setItem("pharmiq_cached_restaurant", JSON.stringify(created));
+            try {
+              const isEvent = created.business_type === "event";
+              await supabase.from("notifications").insert({
+                restaurant_id: created.id,
+                type: "system",
+                title: isEvent ? `Welcome to PharmIQ Events, ${created.name.replace(/&#x27;/g, "'")}! 🎉` : `Welcome to PharmIQ, ${created.name.replace(/&#x27;/g, "'")}! 🎉`,
+                body: isEvent 
+                  ? "Set up your event profile, add your menu items, and generate your table QR codes."
+                  : "Your 3-day free trial has started. Add your menu, generate QR codes, and start taking orders.",
+                link: "/dashboard",
+              });
+
+              // Trigger welcome email via Edge Function
+              if (user.email) {
+                const welcomeKey = `st.welcome_sent.${user.id}`;
+                if (!localStorage.getItem(welcomeKey)) {
+                  localStorage.setItem(welcomeKey, "true");
+                  supabase.functions.invoke("send-email", {
+                    body: {
+                      template: "welcome",
+                      to: user.email,
+                      data: {
+                        businessName: created.name,
+                        dashboardUrl: window.location.origin + "/dashboard"
+                      }
+                    }
+                  }).then(({ error }) => {
+                    if (error) localStorage.removeItem(welcomeKey);
+                  }).catch(err => {
+                    localStorage.removeItem(welcomeKey);
+                    console.error("Failed to send welcome email:", err);
+                  });
+                }
+              }
+            } catch { /* noop */ }
+          }
         }
       }
       setLoading(false);
     };
 
     try {
+      if (!navigator.onLine) {
+        // Quick offline path
+        try {
+          const cached = localStorage.getItem("pharmiq_cached_restaurant");
+          if (cached) {
+            setRestaurant(JSON.parse(cached));
+            const rRole = sessionStorage.getItem("st.role") || "staff";
+            setRole(rRole as any);
+            setLoading(false);
+            return;
+          }
+        } catch (e) {}
+      }
       await Promise.race([doRefresh(), timeoutPromise]);
     } catch (err) {
       console.warn("[restaurant] refresh timed out or failed:", err);
+      // Ensure we have something from cache if timeout happens
+      try {
+        const cached = localStorage.getItem("pharmiq_cached_restaurant");
+        if (cached && !restaurant) {
+          setRestaurant(JSON.parse(cached));
+          const rRole = sessionStorage.getItem("st.role") || "staff";
+          setRole(rRole as any);
+        }
+      } catch (e) {}
       setLoading(false); // Unblock UI even on failure
     }
   }, [user]);

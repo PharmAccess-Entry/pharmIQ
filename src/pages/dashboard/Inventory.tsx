@@ -13,6 +13,8 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useRestaurant } from "@/lib/restaurant";
 import { Badge } from "@/components/ui/badge";
+import { CustomDatePicker } from "@/components/ui/custom-date-picker";
+import { CurrencyInput } from "@/components/ui/currency-input";
 
 type MenuItem = {
   id: string;
@@ -43,6 +45,8 @@ const Inventory = () => {
   const [adjustQty, setAdjustQty] = useState("");
   const [newThreshold, setNewThreshold] = useState("");
   const [isRestocking, setIsRestocking] = useState(false);
+  const [adjustmentReason, setAdjustmentReason] = useState("manual_correction");
+  const [adjustmentNote, setAdjustmentNote] = useState("");
 
   // Filter + log state (ported from PharmIQ)
   const [stockFilter, setStockFilter] = useState("all");
@@ -110,53 +114,54 @@ const Inventory = () => {
       return;
     }
     const actualQty = isNaN(qty) ? 0 : qty;
+    if (actualQty === 0) {
+      toast.error("Enter a non-zero quantity to adjust");
+      return;
+    }
 
     const parsedThreshold = parseInt(newThreshold);
     const finalThreshold = isNaN(parsedThreshold) || parsedThreshold < 0 ? selectedItem.low_stock_threshold : parsedThreshold;
 
     setIsRestocking(true);
 
-    // Calculate new stock
-    const newStock = Math.max(0, selectedItem.stock_quantity + actualQty);
+    // Use the atomic RPC that updates stock AND writes inventory_logs in one transaction.
+    // This prevents double-logging with the DB trigger.
+    const { error: rpcError } = await supabase.rpc("update_stock_with_reason", {
+      p_restaurant_id: rid,
+      p_menu_item_id: selectedItem.id,
+      p_change_qty: actualQty,
+      p_reason: adjustmentReason,
+      p_movement_type: "adjustment",
+      p_note: adjustmentNote || null,
+      p_reference_id: null,
+      p_reference_type: null,
+    });
 
-    // Update menu_items table
-    const { error: updateError } = await supabase
-      .from("menu_items")
-      .update({
-        stock_quantity: newStock,
-        low_stock_threshold: finalThreshold,
-        // Automatically make available again if we restocked from 0 and it was auto-hidden
-        available: (selectedItem.stock_quantity <= 0 && selectedItem.auto_hide_out_of_stock && newStock > 0) ? true : selectedItem.available
-      })
-      .eq("id", selectedItem.id);
-
-    if (updateError) {
-      toast.error("Failed to update stock");
+    if (rpcError) {
+      toast.error("Failed to update stock: " + rpcError.message);
       setIsRestocking(false);
       return;
     }
 
-    // Add log
-    if (actualQty !== 0) {
-      await supabase.from("inventory_logs").insert({
-        restaurant_id: rid,
-        menu_item_id: selectedItem.id,
-        change_qty: actualQty,
-        reason: 'restock'
-      });
+    // Update the threshold separately (not part of stock change)
+    if (finalThreshold !== selectedItem.low_stock_threshold) {
+      await supabase.from("menu_items")
+        .update({ low_stock_threshold: finalThreshold })
+        .eq("id", selectedItem.id);
     }
 
+    const newStock = Math.max(0, selectedItem.stock_quantity + actualQty);
     toast.success("Stock updated successfully");
     setItems(prev => prev.map(i => i.id === selectedItem.id ? {
       ...i,
       stock_quantity: newStock,
       low_stock_threshold: finalThreshold,
-      available: (selectedItem.stock_quantity <= 0 && selectedItem.auto_hide_out_of_stock && newStock > 0) ? true : i.available
     } : i));
 
     setRestockModalOpen(false);
     setSelectedItem(null);
     setAdjustQty("");
+    setAdjustmentReason("manual_correction");
     setIsRestocking(false);
   };
 
@@ -195,26 +200,31 @@ const Inventory = () => {
     }));
     await supabase.from("purchase_order_items").insert(linePayload);
 
-    // 3. Update stock quantities & cost prices for each product
+    // 3. Update stock quantities & cost prices for each product atomically
     for (const line of validLines) {
       const item = items.find(i => i.id === line.menu_item_id);
       if (!item) continue;
-      const newQty = item.stock_quantity + parseInt(line.quantity);
-      const updatePayload: any = { stock_quantity: newQty };
-      if (line.cost_price_per_unit) updatePayload.cost_price = parseFloat(line.cost_price_per_unit);
-      if (line.batch_number.trim()) updatePayload.batch_number = line.batch_number.trim();
-      if (line.expiry_date) updatePayload.expiry_date = line.expiry_date;
-      if (!item.track_inventory) updatePayload.track_inventory = true;
-      // Re-enable if was out of stock
-      if (item.stock_quantity <= 0 && item.auto_hide_out_of_stock && newQty > 0) updatePayload.available = true;
-      await supabase.from("menu_items").update(updatePayload).eq("id", line.menu_item_id);
 
-      // 4. Log inventory change
-      await supabase.from("inventory_logs").insert({
-        restaurant_id: rid,
-        menu_item_id: line.menu_item_id,
-        change_qty: parseInt(line.quantity),
-        reason: "purchase_order"
+      // Update non-stock fields (cost, batch, expiry) separately first
+      const metaPayload: any = {};
+      if (line.cost_price_per_unit) metaPayload.cost_price = parseFloat(line.cost_price_per_unit);
+      if (line.batch_number.trim()) metaPayload.batch_number = line.batch_number.trim();
+      if (line.expiry_date) metaPayload.expiry_date = line.expiry_date;
+      if (!item.track_inventory) metaPayload.track_inventory = true;
+      if (Object.keys(metaPayload).length > 0) {
+        await supabase.from("menu_items").update(metaPayload).eq("id", line.menu_item_id);
+      }
+
+      // 4. Atomic stock update + inventory log via RPC
+      await supabase.rpc("update_stock_with_reason", {
+        p_restaurant_id: rid,
+        p_menu_item_id: line.menu_item_id,
+        p_change_qty: parseInt(line.quantity),
+        p_reason: "purchase_order",
+        p_movement_type: "purchase",
+        p_note: grnReference.trim() || null,
+        p_reference_id: po.id,
+        p_reference_type: "purchase_order",
       });
     }
 
@@ -493,7 +503,7 @@ const Inventory = () => {
             </div>
 
             <div className="overflow-x-auto">
-              <table className="w-full text-sm text-left">
+              <table className="w-full text-sm text-left [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap">
                 <thead className="bg-secondary/50 text-muted-foreground font-medium border-b border-border">
                   <tr>
                     <th className="py-3 px-4 rounded-tl-xl">Item</th>
@@ -626,7 +636,7 @@ const Inventory = () => {
           </div>
 
           <Dialog open={restockModalOpen} onOpenChange={(open) => {
-            if (!open) { setAdjustQty(""); setNewThreshold(""); setSelectedItem(null); }
+            if (!open) { setAdjustQty(""); setNewThreshold(""); setSelectedItem(null); setAdjustmentReason("manual_correction"); setAdjustmentNote(""); }
             setRestockModalOpen(open);
           }}>
             <DialogContent className="sm:max-w-[400px]">
@@ -659,6 +669,34 @@ const Inventory = () => {
                     <Button variant="outline" size="icon" onClick={() => setAdjustQty(prev => String((parseInt(prev) || 0) + 1))}><ArrowUp className="h-4 w-4" /></Button>
                   </div>
                   <p className="text-xs text-muted-foreground text-center">Use positive numbers to add stock, negative to reduce. Leave empty to just update threshold.</p>
+                </div>
+
+                <div className="space-y-3 mt-4">
+                  <label className="text-sm font-medium">Adjustment Reason</label>
+                  <Select value={adjustmentReason} onValueChange={setAdjustmentReason}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a reason" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="damaged">Damaged / Broken</SelectItem>
+                      <SelectItem value="expired">Expired</SelectItem>
+                      <SelectItem value="lost">Lost</SelectItem>
+                      <SelectItem value="theft">Theft</SelectItem>
+                      <SelectItem value="count_correction">Count Correction</SelectItem>
+                      <SelectItem value="supplier_return">Supplier Return</SelectItem>
+                      <SelectItem value="manual_correction">Manual Correction</SelectItem>
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-3 mt-4">
+                  <label className="text-sm font-medium">Notes (Optional)</label>
+                  <Input 
+                    placeholder="Provide additional details..." 
+                    value={adjustmentNote}
+                    onChange={(e) => setAdjustmentNote(e.target.value)}
+                  />
                 </div>
 
                 <div className="space-y-3 mt-6 pt-6 border-t border-border/50">
@@ -805,19 +843,18 @@ const Inventory = () => {
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                         <div className="space-y-1.5">
                           <Label className="text-xs">Qty *</Label>
-                          <Input type="number" min="1" value={line.quantity} onChange={e => setGrnLines(prev => prev.map((l, i) => i === idx ? { ...l, quantity: e.target.value } : l))} className="h-9" />
+                          <CurrencyInput value={line.quantity} onChange={(val) => setGrnLines(prev => prev.map((l, i) => i === idx ? { ...l, quantity: val } : l))} className="h-9" />
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-xs">Cost/Unit (₦)</Label>
-                          <Input type="number" min="0" value={line.cost_price_per_unit} onChange={e => setGrnLines(prev => prev.map((l, i) => i === idx ? { ...l, cost_price_per_unit: e.target.value } : l))} placeholder="0" className="h-9" />
+                          <CurrencyInput value={line.cost_price_per_unit} onChange={(val) => setGrnLines(prev => prev.map((l, i) => i === idx ? { ...l, cost_price_per_unit: val } : l))} placeholder="0" className="h-9" />
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-xs">Batch #</Label>
                           <Input value={line.batch_number} onChange={e => setGrnLines(prev => prev.map((l, i) => i === idx ? { ...l, batch_number: e.target.value } : l))} placeholder="Optional" className="h-9" />
                         </div>
                         <div className="space-y-1.5">
-                          <Label className="text-xs">Expiry Date</Label>
-                          <Input type="date" value={line.expiry_date} onChange={e => setGrnLines(prev => prev.map((l, i) => i === idx ? { ...l, expiry_date: e.target.value } : l))} className="h-9" />
+                          <CustomDatePicker value={line.expiry_date} onChange={(val) => setGrnLines(prev => prev.map((l, i) => i === idx ? { ...l, expiry_date: val } : l))} className="h-9 w-full" />
                         </div>
                       </div>
                     </div>

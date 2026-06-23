@@ -8,8 +8,10 @@ import { toast } from "sonner";
 import { createNotification } from "@/lib/useNotifications";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import {
   Plus, Minus, Trash2, ShoppingCart, Printer, Download, X,
   Banknote, CreditCard, CheckCircle2, Search, UtensilsCrossed,
@@ -22,6 +24,8 @@ import { Receipt } from "@/components/Receipt";
 import { useOfflinePos } from "@/lib/offline/useOfflinePos";
 import { generateAndSaveOfflineReceipt } from "@/lib/offline/receipt";
 import { validateStockChange } from "@/lib/validations/stock";
+import { useOfflineQueue } from "@/lib/offline/useOfflineQueue";
+import { v4 as uuidv4 } from "uuid";
 
 type MenuItem = {
   id: string;
@@ -63,15 +67,16 @@ export default function PosMode() {
   // Pharmacies don't have tables so we bypass the table-count check.
   const subStatus = restaurant?.subscription_status;
   const isPharmacy = restaurant?.business_type === "pharmacy";
-  const posUnlocked = subStatus === "active" || subStatus === "trial" || isPharmacy;
+  const trialExpired = subStatus === "trial" && (restaurant?.trial_ends_at ? new Date(restaurant.trial_ends_at).getTime() < Date.now() : true);
+  const posUnlocked = subStatus === "active" || (subStatus === "trial" && !trialExpired);
   const subLoaded = restaurant !== null; // once context loads
 
   // ── Shift state ──
-  type Shift = { id: string; start_cash: number; start_time: string; start_pos?: number; start_transfers?: number };
+  type Shift = { id: string; start_cash: number; start_time: string };
   const [activeShift, setActiveShift] = useState<Shift | null | undefined>(undefined); // undefined = loading
-  const [previousShift, setPreviousShift] = useState<any>(null);
   const [shiftModalOpen, setShiftModalOpen] = useState(false);
   const [endShiftModalOpen, setEndShiftModalOpen] = useState(false);
+  const [previousClosedShift, setPreviousClosedShift] = useState<any>(null);
   const [startCashStr, setStartCashStr] = useState("");
   const [startPosStr, setStartPosStr] = useState("");
   const [startTransferStr, setStartTransferStr] = useState("");
@@ -80,11 +85,8 @@ export default function PosMode() {
   const [endTransferStr, setEndTransferStr] = useState("");
   const [shiftNotes, setShiftNotes] = useState("");
   const [shiftLoading, setShiftLoading] = useState(false);
-
-  // Settle Register state
-  const [settleModalOpen, setSettleModalOpen] = useState(false);
-  const [lastClosedShift, setLastClosedShift] = useState<any>(null);
-  const [settleLoading, setSettleLoading] = useState(false);
+  // expectedTotals are fetched from the DB when cashier clicks End Shift
+  const [shiftExpected, setShiftExpected] = useState<{ expected_cash: number; expected_pos: number; expected_transfers: number } | null>(null);
 
   const parseCurrency = (val: string) => parseInt(val.replace(/,/g, "")) || 0;
   const handleCurrencyInput = (val: string, setter: (v: string) => void) => {
@@ -92,12 +94,12 @@ export default function PosMode() {
     setter(raw ? parseInt(raw).toLocaleString("en-US") : "");
   };
 
-  // Load active shift for the current user
+  // Load active shift for THIS user only
   const loadActiveShift = useCallback(async () => {
     if (!restaurant?.id || !user?.id) return;
     const { data } = await supabase
       .from("shifts")
-      .select("id, start_cash, start_time, start_pos, start_transfers")
+      .select("id, start_cash, start_time")
       .eq("restaurant_id", restaurant.id)
       .eq("user_id", user.id)
       .eq("status", "active")
@@ -105,7 +107,8 @@ export default function PosMode() {
       .limit(1)
       .maybeSingle();
     setActiveShift(data ?? null);
-    // If no active shift, fetch previous shift for handover balances
+    
+    // Always prefetch the last closed shift for handover assistance
     if (!data) {
       const { data: prevShift } = await supabase
         .from("shifts")
@@ -115,18 +118,9 @@ export default function PosMode() {
         .order("end_time", { ascending: false })
         .limit(1)
         .maybeSingle();
-
+      
       if (prevShift) {
-        setPreviousShift(prevShift);
-        if (prevShift.settled_at) {
-          setStartCashStr("0");
-          setStartPosStr("0");
-          setStartTransferStr("0");
-        } else {
-          setStartCashStr(prevShift.actual_cash ? Number(prevShift.actual_cash).toLocaleString("en-US") : "");
-          setStartPosStr(prevShift.actual_pos ? Number(prevShift.actual_pos).toLocaleString("en-US") : "");
-          setStartTransferStr(prevShift.actual_transfers ? Number(prevShift.actual_transfers).toLocaleString("en-US") : "");
-        }
+        setPreviousClosedShift(prevShift);
       }
       setShiftModalOpen(true);
     }
@@ -134,48 +128,41 @@ export default function PosMode() {
 
   const startShift = async () => {
     if (!restaurant?.id || !user?.id) return;
-
     const cashVal = parseCurrency(startCashStr);
     const posVal = parseCurrency(startPosStr);
     const transferVal = parseCurrency(startTransferStr);
-
-    let discrepancyCash = 0, discrepancyPos = 0, discrepancyTransfer = 0;
-    const expectedCash = previousShift && !previousShift.settled_at ? (Number(previousShift.actual_cash) || 0) : 0;
-    const expectedPos = previousShift && !previousShift.settled_at ? (Number(previousShift.actual_pos) || 0) : 0;
-    const expectedTransfer = previousShift && !previousShift.settled_at ? (Number(previousShift.actual_transfers) || 0) : 0;
-
-    if (previousShift) {
-      discrepancyCash = cashVal - expectedCash;
-      discrepancyPos = posVal - expectedPos;
-      discrepancyTransfer = transferVal - expectedTransfer;
-    }
-
     setShiftLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from("shifts")
-        .insert({
-          restaurant_id: restaurant.id,
-          user_id: user.id,
-          start_cash: cashVal,
-          start_pos: posVal,
-          start_transfers: transferVal,
-          status: "active",
-          previous_shift_id: previousShift?.id || null
-        })
-        .select("id, start_cash, start_time, start_pos, start_transfers")
-        .single();
-      if (error) throw error;
 
-      // Log handover discrepancies against the previous shift
-      if (previousShift && (discrepancyCash !== 0 || discrepancyPos !== 0 || discrepancyTransfer !== 0)) {
-        await supabase.from("shifts").update({
-          handover_discrepancy_cash: discrepancyCash,
-          handover_discrepancy_pos: discrepancyPos,
-          handover_discrepancy_transfers: discrepancyTransfer
-        }).eq("id", previousShift.id);
+    const newShiftId = uuidv4();
+    const payload = {
+      id: newShiftId,
+      restaurant_id: restaurant.id,
+      user_id: user.id,
+      start_cash: cashVal,
+      start_pos: posVal,
+      start_transfers: transferVal,
+      status: "active" as const,
+      start_time: new Date().toISOString()
+    };
+
+    try {
+      if (isOffline) {
+        await queueAction(restaurant.id, "SHIFT_CREATE", payload);
+        setActiveShift(payload);
+        setShiftModalOpen(false);
+        setStartCashStr("");
+        setStartPosStr("");
+        setStartTransferStr("");
+        toast.success("Offline shift started ✓");
+        return;
       }
 
+      const { data, error } = await supabase
+        .from("shifts")
+        .insert(payload)
+        .select("id, start_cash, start_time")
+        .single();
+      if (error) throw error;
       setActiveShift(data);
       setShiftModalOpen(false);
       setStartCashStr("");
@@ -189,146 +176,94 @@ export default function PosMode() {
     }
   };
 
-  const handleOpenEndShift = async () => {
-    if (!activeShift || !restaurant?.id) return;
-
-    try {
-      const { data: shiftOrders } = await supabase
-        .from("orders")
-        .select("total, payment_status")
-        .eq("restaurant_id", restaurant.id)
-        .gte("created_at", activeShift.start_time)
-        .in("payment_status", ["cash_paid", "pos_paid", "cash_pos", "confirmed"]);
-
-      let expectedPos = Number(activeShift.start_pos) || 0;
-      let expectedTransfer = Number(activeShift.start_transfers) || 0;
-
-      (shiftOrders || []).forEach(o => {
-        const amt = Number(o.total) || 0;
-        if (o.payment_status === "pos_paid" || o.payment_status === "cash_pos") expectedPos += amt;
-        else if (o.payment_status === "confirmed") expectedTransfer += amt;
-      });
-
-      if (expectedPos > 0) setEndPosStr(expectedPos.toLocaleString("en-US"));
-      else setEndPosStr("");
-
-      if (expectedTransfer > 0) setEndTransferStr(expectedTransfer.toLocaleString("en-US"));
-      else setEndTransferStr("");
-
-      setEndShiftModalOpen(true);
-    } catch (e) {
-      console.error("Could not pre-fill amounts", e);
-      setEndShiftModalOpen(true);
+  const usePreviousBalances = () => {
+    if (!previousClosedShift) return;
+    // If settled, expected to start with 0
+    if (previousClosedShift.settled_at) {
+      setStartCashStr("0");
+      setStartPosStr("0");
+      setStartTransferStr("0");
+      toast.info("Register was already settled. Balances set to ₦0.");
+    } else {
+      setStartCashStr(previousClosedShift.actual_cash ? Number(previousClosedShift.actual_cash).toLocaleString("en-US") : "0");
+      setStartPosStr(previousClosedShift.actual_pos ? Number(previousClosedShift.actual_pos).toLocaleString("en-US") : "0");
+      setStartTransferStr(previousClosedShift.actual_transfers ? Number(previousClosedShift.actual_transfers).toLocaleString("en-US") : "0");
     }
   };
 
-  const endShift = async () => {
-    if (!activeShift || !restaurant?.id) return;
+  // Open End Shift modal — fetch accurate server-side expected totals via RPC
+  const handleOpenEndShift = async () => {
+    if (!activeShift) return;
     setShiftLoading(true);
     try {
-      const { data: shiftOrders } = await supabase
-        .from("orders")
-        .select("total, payment_status")
-        .eq("restaurant_id", restaurant.id)
-        .gte("created_at", activeShift.start_time)
-        .in("payment_status", ["cash_paid", "pos_paid", "cash_pos", "confirmed"]);
-
-      let expectedCash = Number(activeShift.start_cash) || 0;
-      let expectedPos = Number(activeShift.start_pos) || 0;
-      let expectedTransfer = Number(activeShift.start_transfers) || 0;
-
-      (shiftOrders || []).forEach(o => {
-        const amt = Number(o.total) || 0;
-        if (o.payment_status === "cash_paid") expectedCash += amt;
-        else if (o.payment_status === "pos_paid" || o.payment_status === "cash_pos") expectedPos += amt;
-        else if (o.payment_status === "confirmed") expectedTransfer += amt;
-      });
-
-      const actualCash = parseCurrency(endCashStr);
-      const actualPos = parseCurrency(endPosStr);
-      const actualTransfer = parseCurrency(endTransferStr);
-
-      const { error } = await supabase
-        .from("shifts")
-        .update({
-          status: "completed",
-          end_time: new Date().toISOString(),
-          expected_cash: expectedCash,
-          actual_cash: actualCash,
-          expected_pos: expectedPos,
-          actual_pos: actualPos,
-          expected_transfers: expectedTransfer,
-          actual_transfers: actualTransfer,
-          notes: shiftNotes || null,
-        })
-        .eq("id", activeShift.id);
-
+      const { data, error } = await supabase.rpc("get_shift_expected_totals", { p_shift_id: activeShift.id });
       if (error) throw error;
+      const totals = data as any;
+      setShiftExpected({
+        expected_cash: Number(totals.expected_cash) || 0,
+        expected_pos: Number(totals.expected_pos) || 0,
+        expected_transfers: Number(totals.expected_transfers) || 0,
+      });
+      // Pre-fill actual fields with expected — cashier adjusts if counts differ
+      setEndCashStr(Number(totals.expected_cash || 0).toLocaleString("en-US"));
+      setEndPosStr(Number(totals.expected_pos || 0).toLocaleString("en-US"));
+      setEndTransferStr(Number(totals.expected_transfers || 0).toLocaleString("en-US"));
+    } catch (e) {
+      console.error("Could not pre-fill expected totals", e);
+    } finally {
+      setShiftLoading(false);
+    }
+    setEndShiftModalOpen(true);
+  };
 
-      const cashVariance = actualCash - expectedCash;
-      const varianceMsg = cashVariance === 0 ? "" : cashVariance > 0 ? ` (+${formatNaira(cashVariance)} cash over)` : ` (${formatNaira(Math.abs(cashVariance))} cash short)`;
-      toast.success(`Shift ended!${varianceMsg}`);
+  const endShift = async () => {
+    if (!activeShift) return;
+    if (!shiftExpected) {
+      toast.error("Expected totals not loaded. Please close and re-open the End Shift dialog.");
+      return;
+    }
+    setShiftLoading(true);
+    try {
+      const actualCashVal = parseCurrency(endCashStr);
+      const actualPosVal = parseCurrency(endPosStr);
+      const actualTransfersVal = parseCurrency(endTransferStr);
+      
+      const payload = {
+        id: activeShift.id,
+        data: {
+          expected_cash: shiftExpected?.expected_cash || 0,
+          actual_cash: actualCashVal,
+          expected_pos: shiftExpected?.expected_pos || 0,
+          actual_pos: actualPosVal,
+          expected_transfers: shiftExpected?.expected_transfers || 0,
+          actual_transfers: actualTransfersVal,
+          status: "completed" as const,
+          end_time: new Date().toISOString(),
+          notes: shiftNotes || null,
+        }
+      };
+
+      if (isOffline) {
+        await queueAction(restaurant!.id, "SHIFT_CLOSE", payload);
+        toast.success("Shift closed offline. Will sync when connection is restored.");
+      } else {
+        const { error } = await supabase
+          .from("shifts")
+          .update(payload.data)
+          .eq("id", activeShift.id);
+        if (error) throw error;
+        toast.success("Shift ended successfully!");
+      }
+
       setActiveShift(null);
       setEndShiftModalOpen(false);
+      setShiftExpected(null);
       setEndCashStr(""); setEndPosStr(""); setEndTransferStr(""); setShiftNotes("");
       setShiftModalOpen(true);
     } catch (e: any) {
       toast.error(e.message || "Could not end shift");
     } finally {
       setShiftLoading(false);
-    }
-  };
-
-  const handleOpenSettle = async () => {
-    if (!restaurant?.id) {
-      toast.error("Account not loaded yet.");
-      return;
-    }
-    setSettleLoading(true);
-    try {
-      const { data: shift, error } = await supabase
-        .from("shifts")
-        .select("id, actual_cash, actual_pos, actual_transfers, settled_at, end_time")
-        .eq("restaurant_id", restaurant.id)
-        .eq("status", "completed")
-        .order("end_time", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (error) { toast.error("Database error: " + error.message); return; }
-      if (!shift) { toast.info("No completed shifts found. End a shift first."); return; }
-      if (shift.settled_at) { toast.info("The register has already been settled for the last shift."); return; }
-
-      setLastClosedShift(shift);
-      setSettleModalOpen(true);
-    } catch (err: any) {
-      toast.error("Unexpected error: " + err.message);
-    } finally {
-      setSettleLoading(false);
-    }
-  };
-
-  const confirmSettle = async () => {
-    if (!lastClosedShift) return;
-    setSettleLoading(true);
-    try {
-      const { error } = await supabase
-        .from("shifts")
-        .update({ settled_at: new Date().toISOString() })
-        .eq("id", lastClosedShift.id);
-      if (error) throw error;
-      toast.success("Register settled! Expected balances are now ₦0.");
-      setSettleModalOpen(false);
-      if (previousShift && previousShift.id === lastClosedShift.id) {
-        setPreviousShift({ ...previousShift, settled_at: new Date().toISOString() });
-        setStartCashStr("0");
-        setStartPosStr("0");
-        setStartTransferStr("0");
-      }
-    } catch (err: any) {
-      toast.error("Failed to settle register: " + err.message);
-    } finally {
-      setSettleLoading(false);
     }
   };
   const [categories, setCategories] = useState<string[]>([]);
@@ -340,7 +275,7 @@ export default function PosMode() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [orderIntent, setOrderIntent] = useState<"takeaway" | "dine-in" | "mixed">("takeaway");
   
-  const { products: menuItems, isLoading: loading, placeOrder: offlinePlaceOrder, isOffline } = useOfflinePos(restaurant?.id, user?.id);
+  const { products: menuItems, isLoading: loading, isOffline, pendingSyncCount, placeOrder: offlinePlaceOrder, syncProductsSnapshot } = useOfflinePos(restaurant?.id, user?.id);
   const [cashGivenStr, setCashGivenStr] = useState<string>("");
   const cashGiven = parseInt(cashGivenStr.replace(/,/g, "")) || 0;
   const [placing, setPlacing] = useState(false);
@@ -377,8 +312,9 @@ export default function PosMode() {
       .from("orders")
       .select("id, short_code, total, customer_name, intent, created_at, order_items(name, qty, item_intent)")
       .eq("restaurant_id", restaurant.id)
-      .eq("table_number", "POS")
-      .eq("payment_status", "awaiting_transfer")
+      .in("table_number", ["POS", "Walk-in"])
+      .eq("status", "served")
+      .eq("payment_status", "unpaid")
       .order("created_at", { ascending: true });
 
     if (!error && data) {
@@ -569,6 +505,11 @@ export default function PosMode() {
 
   // Place order
   const placeOrder = async () => {
+    if (!activeShift) {
+      setShiftModalOpen(true);
+      toast.error("An active shift is required to process a sale.");
+      return;
+    }
     const validCart = cart.filter((i) => i.qty > 0);
     if (validCart.length === 0) return;
     if (!restaurant?.id) return;
@@ -587,7 +528,7 @@ export default function PosMode() {
 
     setPlacing(true);
     try {
-      const { shortCode, orderId } = await offlinePlaceOrder(validCart, paymentMethod, total, customerName, cashGiven, patientId);
+      const { shortCode, orderId } = await offlinePlaceOrder(validCart, paymentMethod, total, customerName, cashGiven, patientId, activeShift?.id);
 
       // We only attempt to notify if we're online, but the order is already secured offline
       if (!isOffline) {
@@ -619,15 +560,13 @@ export default function PosMode() {
         }]);
         setCheckoutOpen(false);
         clearCart();
-        toast.success(`${shortCode} sent to kitchen — awaiting transfer confirmation`);
+        toast.success(`${shortCode} parked — awaiting transfer confirmation`);
       } else {
         setSuccessOrder({
           id: orderId,
           shortCode, items: validCart, total, paymentMethod, cashGiven, orderIntent });
         setMobileCartOpen(false);
         toast.success(`Order ${shortCode} placed!`);
-        // Re-sync pending transfers so any dismissed banners reappear
-        loadPendingTransfers();
       }
     } catch (e: any) {
       toast.error(e.message || "Failed to place order");
@@ -639,7 +578,17 @@ export default function PosMode() {
   // Confirm transfer payment for a parked order
   const confirmTransfer = async (pt: PendingTransfer) => {
     setConfirmingTransfer(pt);
-    await supabase.from("orders").update({ payment_status: "confirmed" }).eq("id", pt.orderId);
+    const { error } = await supabase.from("orders").update({ 
+      status: "completed",
+      payment_status: "confirmed" 
+    }).eq("id", pt.orderId);
+    
+    if (error) {
+      toast.error("Failed to confirm: " + error.message);
+      setConfirmingTransfer(null);
+      return;
+    }
+
     setPendingTransfers(prev => prev.filter(t => t.orderId !== pt.orderId));
     setSuccessOrder({ id: pt.orderId, shortCode: pt.shortCode, items: pt.items, total: pt.total, paymentMethod: pt.paymentMethod, cashGiven: pt.cashGiven, orderIntent: pt.orderIntent });
     setConfirmingTransfer(null);
@@ -648,10 +597,6 @@ export default function PosMode() {
     loadPendingTransfers();
   };
 
-  // Dismiss a parked transfer without confirming
-  const dismissTransfer = (orderId: string) => {
-    setPendingTransfers(prev => prev.filter(t => t.orderId !== orderId));
-  };
 
   // Download receipt as PNG
   const downloadReceipt = async (itemsOverride?: CartItem[], totalOverride?: number) => {
@@ -710,32 +655,34 @@ export default function PosMode() {
             className="pl-8 h-8 text-xs"
           />
         </div>
-        <div className="flex bg-background border border-border rounded-lg mt-3 overflow-hidden p-0.5">
-          <button
-            onClick={() => handleOrderIntentChange("takeaway")}
-            className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${
-              orderIntent === "takeaway" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-secondary/80"
-            }`}
-          >
-            Takeaway
-          </button>
-          <button
-            onClick={() => handleOrderIntentChange("dine-in")}
-            className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${
-              orderIntent === "dine-in" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-secondary/80"
-            }`}
-          >
-            Dine In
-          </button>
-          <button
-            onClick={() => handleOrderIntentChange("mixed")}
-            className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${
-              orderIntent === "mixed" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-secondary/80"
-            }`}
-          >
-            Mixed
-          </button>
-        </div>
+        {!isPharmacy && (
+          <div className="flex bg-background border border-border rounded-lg mt-3 overflow-hidden p-0.5">
+            <button
+              onClick={() => handleOrderIntentChange("takeaway")}
+              className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${
+                orderIntent === "takeaway" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-secondary/80"
+              }`}
+            >
+              Walk-in
+            </button>
+            <button
+              onClick={() => handleOrderIntentChange("dine-in")}
+              className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${
+                orderIntent === "dine-in" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-secondary/80"
+              }`}
+            >
+              Delivery
+            </button>
+            <button
+              onClick={() => handleOrderIntentChange("mixed")}
+              className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${
+                orderIntent === "mixed" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:bg-secondary/80"
+              }`}
+            >
+              Mixed
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Cart items */}
@@ -789,7 +736,7 @@ export default function PosMode() {
                     onClick={() => toggleItemIntent(item.cartItemId)}
                     className="text-[10px] bg-background border border-border px-2 py-1 rounded-md text-muted-foreground hover:text-primary transition-colors font-semibold"
                   >
-                    {item.item_intent === "take-away" ? "🛍️ Takeaway" : "🍽️ Dine In"}
+                    {item.item_intent === "take-away" ? "🛍️ Walk-in" : "🚚 Delivery"}
                   </button>
                   {item.qty > 1 && (
                     <button 
@@ -827,16 +774,17 @@ export default function PosMode() {
         {isPharmacy && (
           <div className="space-y-1.5">
             <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1"><User className="w-3 h-3" /> Link Patient (optional)</label>
-            <select
-              value={patientId}
-              onChange={e => setPatientId(e.target.value)}
-              className="w-full h-8 text-xs rounded-md border border-border bg-card px-2 focus:outline-none focus:ring-1 focus:ring-primary"
-            >
-              <option value="">Walk-in / No patient</option>
-              {patients.map(p => (
-                <option key={p.id} value={p.id}>{p.name} — {p.phone}</option>
-              ))}
-            </select>
+            <Select value={patientId || "none"} onValueChange={(val) => setPatientId(val === "none" ? "" : val)}>
+              <SelectTrigger className="w-full h-8 text-xs">
+                <SelectValue placeholder="Walk-in / No patient" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Walk-in / No patient</SelectItem>
+                {patients.map(p => (
+                  <SelectItem key={p.id} value={p.id}>{p.name} — {p.phone}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
         <Button
@@ -873,14 +821,14 @@ export default function PosMode() {
           <div>
             <h2 className="font-display text-2xl font-bold mb-2">Cashier / POS is a Premium Feature</h2>
             <p className="text-muted-foreground text-sm max-w-sm">
-              The Cashier POS requires an active subscription with at least
-              <span className="font-bold text-foreground"> 5 tables (&#x20A6;10,000/month)</span>.
+              The Cashier POS requires an active subscription of
+              <span className="font-bold text-foreground"> &#x20A6;5,000/month</span>.
               Upgrade your plan to unlock walk-in order management, mixed orders, bank transfer tracking, and printed receipts.
             </p>
           </div>
           <div className="bg-card border border-border rounded-2xl p-5 max-w-xs w-full shadow-soft text-left space-y-3">
             <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">What you unlock</div>
-            {["Lightning-fast walk-in orders", "Cash, POS & Bank Transfer support", "Park &amp; Attend for transfers", "Dine In / Takeaway / Mixed orders", "Printable &amp; downloadable receipts"].map(f => (
+            {["Lightning-fast walk-in orders", "Cash, POS & Bank Transfer support", "Park &amp; Attend for transfers", "Walk-in / Delivery / OTC orders", "Printable &amp; downloadable receipts"].map(f => (
               <div key={f} className="flex items-start gap-2 text-sm">
                 <span className="text-primary mt-0.5">✓</span> <span dangerouslySetInnerHTML={{ __html: f }} />
               </div>
@@ -892,7 +840,7 @@ export default function PosMode() {
             </Button>
           </a>
           {subStatus === "trial" && (
-            <p className="text-xs text-muted-foreground">You are currently on a free trial. Subscribe to any plan with 5+ tables to access this feature.</p>
+            <p className="text-xs text-muted-foreground">You are currently on a free trial. Upgrade your plan to access this feature.</p>
           )}
         </div>
       )}
@@ -906,7 +854,7 @@ export default function PosMode() {
           <span className="text-lg">🚫</span>
           <div>
             <div className="font-bold">Orders Are Currently Paused</div>
-            <div className="text-xs font-normal text-destructive/80 mt-0.5">The restaurant is not accepting orders. Re-enable in <a href="/dashboard/settings" className="underline font-bold">Settings → Accepting Orders</a>.</div>
+            <div className="text-xs font-normal text-destructive/80 mt-0.5">The {isPharmacy ? 'pharmacy' : 'restaurant'} is not accepting orders. Re-enable in <a href="/dashboard/settings" className="underline font-bold">Settings → Accepting Orders</a>.</div>
           </div>
         </div>
       )}
@@ -946,9 +894,9 @@ export default function PosMode() {
                 <LogOut className="h-4 w-4" /> End Shift
               </Button>
             )}
-            {!activeShift && (role === "owner" || role === "manager") && (
-              <Button variant="outline" size="sm" onClick={handleOpenSettle} disabled={settleLoading} className="gap-1.5 bg-amber-500/10 text-amber-600 border-amber-500/20 hover:bg-amber-500/20 dark:text-amber-400">
-                <CheckCircle2 className="h-4 w-4" /> Settle Day
+            {!activeShift && (
+              <Button variant="outline" size="sm" onClick={() => setShiftModalOpen(true)} className="gap-1.5">
+                <Clock className="h-4 w-4" /> Start Shift
               </Button>
             )}
             {cartCount > 0 && (
@@ -1199,7 +1147,7 @@ export default function PosMode() {
               <div className={`rounded-xl p-3 text-sm text-center w-full overflow-hidden break-words ${paymentMethod === "bank_transfer" ? "bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400" : "bg-secondary/50 text-muted-foreground"}`}>
                 {paymentMethod === "pos_terminal"
                   ? "Swipe / tap the customer's card on your POS terminal, then click Confirm below."
-                  : <><span className="font-bold block mb-1">🏃 Park &amp; Attend</span><span className="text-xs leading-relaxed">Order goes to kitchen right away. A banner will remind you to confirm the transfer — serve the next customer meanwhile!</span></>}
+                  : <><span className="font-bold block mb-1">🏃 Park &amp; Attend</span><span className="text-xs leading-relaxed">Order is processed immediately. A banner will remind you to confirm the transfer — serve the next customer meanwhile!</span></>}
               </div>
             )}
 
@@ -1212,9 +1160,9 @@ export default function PosMode() {
               {placing ? (
                 <><span className="animate-spin">⏳</span> Processing...</>
               ) : paymentMethod === "bank_transfer" ? (
-                <><Clock className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">Send to Kitchen &amp; Wait for Transfer</span><span className="sm:hidden">Send to Kitchen</span></>
+                <><Clock className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">Park &amp; Wait for Transfer</span><span className="sm:hidden">Park Order</span></>
               ) : (
-                <><CheckCircle2 className="h-4 w-4" /> Confirm &amp; Send to Kitchen</>
+                <><CheckCircle2 className="h-4 w-4" /> Confirm &amp; Dispense</>
               )}
             </Button>
           </div>
@@ -1223,78 +1171,65 @@ export default function PosMode() {
 
       {/* ── START SHIFT MODAL ── */}
       <Dialog open={shiftModalOpen} onOpenChange={setShiftModalOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Clock className="h-5 w-5 text-primary" /> Start Your Shift
             </DialogTitle>
             <DialogDescription>
-              {previousShift ? "Please verify the handover balances from the previous shift. Edit the amounts if what you count differs from what was left." : "Enter your starting balances to begin your shift."}
+              Enter the opening balances you are starting with. You can default to ₦0 or use the previous shift's counts.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            
+            {previousClosedShift && (
+              <div className="bg-secondary/50 rounded-xl p-3 text-xs text-muted-foreground space-y-2">
+                <div className="flex items-center justify-between font-bold text-foreground mb-1">
+                  <span>Previous Closed Shift</span>
+                  {previousClosedShift.settled_at && <Badge className="bg-emerald-500/20 text-emerald-600 text-[10px]">Settled</Badge>}
+                </div>
+                <div className="flex justify-between"><span>Cash:</span><span>{formatNaira(previousClosedShift.settled_at ? 0 : Number(previousClosedShift.actual_cash) || 0)}</span></div>
+                <div className="flex justify-between"><span>POS:</span><span>{formatNaira(previousClosedShift.settled_at ? 0 : Number(previousClosedShift.actual_pos) || 0)}</span></div>
+                <div className="flex justify-between"><span>Transfer:</span><span>{formatNaira(previousClosedShift.settled_at ? 0 : Number(previousClosedShift.actual_transfers) || 0)}</span></div>
+                <Button variant="outline" size="sm" className="w-full mt-2 text-xs h-7 font-semibold" onClick={usePreviousBalances}>
+                  Use Previous Balances
+                </Button>
+              </div>
+            )}
+
             <div>
-              <label className="text-sm font-medium block mb-1.5 flex justify-between">
-                <span>Opening Cash (₦)</span>
-                {previousShift && <span className="text-muted-foreground font-normal">Expected: {formatNaira(previousShift.settled_at ? 0 : (Number(previousShift.actual_cash) || 0))}</span>}
-              </label>
+              <label className="text-sm font-medium block mb-1.5">Opening Cash Float (₦)</label>
               <Input
                 type="text"
                 inputMode="numeric"
-                placeholder="e.g. 5,000"
+                placeholder="e.g. 10,000"
                 value={startCashStr}
                 onChange={(e) => handleCurrencyInput(e.target.value, setStartCashStr)}
                 className="text-lg font-bold h-12"
                 autoFocus
               />
-              {previousShift && parseCurrency(startCashStr) !== (previousShift.settled_at ? 0 : (Number(previousShift.actual_cash) || 0)) && (
-                <p className="text-xs text-destructive mt-1 font-medium flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3" />
-                  Variance of {formatNaira(parseCurrency(startCashStr) - (previousShift.settled_at ? 0 : (Number(previousShift.actual_cash) || 0)))} will be logged against previous shift.
-                </p>
-              )}
             </div>
-
             <div>
-              <label className="text-sm font-medium block mb-1.5 flex justify-between">
-                <span>POS Terminal Total (₦)</span>
-                {previousShift && <span className="text-muted-foreground font-normal">Expected: {formatNaira(previousShift.settled_at ? 0 : (Number(previousShift.actual_pos) || 0))}</span>}
-              </label>
+              <label className="text-sm font-medium block mb-1.5">Opening POS (₦)</label>
               <Input
                 type="text"
                 inputMode="numeric"
-                placeholder="e.g. 50,000"
+                placeholder="e.g. 0"
                 value={startPosStr}
                 onChange={(e) => handleCurrencyInput(e.target.value, setStartPosStr)}
-                className="text-lg font-bold h-12"
+                className="font-bold"
               />
-              {previousShift && parseCurrency(startPosStr) !== (previousShift.settled_at ? 0 : (Number(previousShift.actual_pos) || 0)) && (
-                <p className="text-xs text-destructive mt-1 font-medium flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3" />
-                  Variance of {formatNaira(parseCurrency(startPosStr) - (previousShift.settled_at ? 0 : (Number(previousShift.actual_pos) || 0)))} will be logged.
-                </p>
-              )}
             </div>
-
             <div>
-              <label className="text-sm font-medium block mb-1.5 flex justify-between">
-                <span>Bank Transfers Total (₦)</span>
-                {previousShift && <span className="text-muted-foreground font-normal">Expected: {formatNaira(previousShift.settled_at ? 0 : (Number(previousShift.actual_transfers) || 0))}</span>}
-              </label>
+              <label className="text-sm font-medium block mb-1.5">Opening Bank Transfers (₦)</label>
               <Input
                 type="text"
                 inputMode="numeric"
-                placeholder="e.g. 20,000"
+                placeholder="e.g. 0"
                 value={startTransferStr}
                 onChange={(e) => handleCurrencyInput(e.target.value, setStartTransferStr)}
-                className="text-lg font-bold h-12"
+                className="font-bold"
               />
-              {previousShift && parseCurrency(startTransferStr) !== (previousShift.settled_at ? 0 : (Number(previousShift.actual_transfers) || 0)) && (
-                <p className="text-xs text-destructive mt-1 font-medium flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3" />
-                  Variance of {formatNaira(parseCurrency(startTransferStr) - (previousShift.settled_at ? 0 : (Number(previousShift.actual_transfers) || 0)))} will be logged.
-                </p>
-              )}
             </div>
 
             <Button className="w-full font-bold mt-2" size="lg" onClick={startShift} disabled={shiftLoading}>
@@ -1306,20 +1241,36 @@ export default function PosMode() {
 
       {/* ── END SHIFT MODAL ── */}
       <Dialog open={endShiftModalOpen} onOpenChange={setEndShiftModalOpen}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-sm max-h-[85vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <AlertCircle className="h-5 w-5 text-destructive" /> End Shift — Handover
+              <AlertCircle className="h-5 w-5 text-destructive" /> End Shift — Cash Drop
             </DialogTitle>
             <DialogDescription>
-              Count your totals and enter what you actually have. The system will detect any variance.
+              Count your drawer and verify POS / transfer totals. The system has pre-filled the expected amounts.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 py-2">
+          <div className="space-y-3 py-2 overflow-y-auto flex-1 pr-1">
+            {shiftExpected && (
+              <div className="bg-secondary/50 rounded-xl p-3 text-xs space-y-1 text-muted-foreground">
+                <p className="font-bold text-foreground text-sm mb-2">System Expected Totals</p>
+                <div className="flex justify-between"><span>Cash (incl. float):</span><span className="font-semibold text-foreground">{formatNaira(shiftExpected.expected_cash)}</span></div>
+                <div className="flex justify-between"><span>POS Terminal:</span><span className="font-semibold text-foreground">{formatNaira(shiftExpected.expected_pos)}</span></div>
+                <div className="flex justify-between"><span>Bank Transfers:</span><span className="font-semibold text-foreground">{formatNaira(shiftExpected.expected_transfers)}</span></div>
+              </div>
+            )}
             <div>
               <label className="text-sm font-medium block mb-1">Actual Cash in Drawer (₦)</label>
               <Input type="text" inputMode="numeric" placeholder="0" value={endCashStr}
                 onChange={(e) => handleCurrencyInput(e.target.value, setEndCashStr)} className="font-bold" />
+              {shiftExpected && parseCurrency(endCashStr) !== shiftExpected.expected_cash && endCashStr !== "" && (
+                <p className={`text-xs mt-1 font-medium flex items-center gap-1 ${parseCurrency(endCashStr) < shiftExpected.expected_cash ? "text-destructive" : "text-amber-500"}`}>
+                  <AlertCircle className="w-3 h-3" />
+                  {parseCurrency(endCashStr) < shiftExpected.expected_cash
+                    ? `₦${formatNaira(shiftExpected.expected_cash - parseCurrency(endCashStr))} SHORT`
+                    : `₦${formatNaira(parseCurrency(endCashStr) - shiftExpected.expected_cash)} OVER`}
+                </p>
+              )}
             </div>
             <div>
               <label className="text-sm font-medium block mb-1">POS Terminal Total (₦)</label>
@@ -1333,9 +1284,12 @@ export default function PosMode() {
             </div>
             <div>
               <label className="text-sm font-medium block mb-1">Notes (optional)</label>
-              <Input placeholder="e.g. Gave change for ₦500 shortage..." value={shiftNotes}
+              <Input placeholder="e.g. ₦500 change discrepancy explained..." value={shiftNotes}
                 onChange={(e) => setShiftNotes(e.target.value)} />
             </div>
+            <p className="text-xs text-muted-foreground bg-primary/5 p-2 rounded-lg">
+              💡 Admin will settle this shift in Shift Management after verifying your drop.
+            </p>
             <Button className="w-full font-bold" variant="destructive" size="lg" onClick={endShift} disabled={shiftLoading}>
               {shiftLoading ? <><span className="animate-spin mr-2">⏳</span> Ending...</> : <><LogOut className="h-4 w-4 mr-2" /> Confirm & End Shift</>}
             </Button>
@@ -1343,49 +1297,7 @@ export default function PosMode() {
         </DialogContent>
       </Dialog>
 
-      {/* ── SETTLE DAY MODAL ── */}
-      <Dialog open={settleModalOpen} onOpenChange={setSettleModalOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-amber-600 dark:text-amber-400">
-              <CheckCircle2 className="h-5 w-5" /> End of Day Settlement
-            </DialogTitle>
-            <DialogDescription>
-              Confirm that you have withdrawn the cash and settled the POS terminal. This will reset the expected starting balances for the next shift to ₦0.
-            </DialogDescription>
-          </DialogHeader>
-          {lastClosedShift && (
-            <div className="space-y-4 py-2">
-              <div className="bg-secondary/40 rounded-xl p-4 space-y-3">
-                <div className="flex justify-between text-sm">
-                  <span>Actual Cash to Withdraw:</span>
-                  <span className="font-bold">{formatNaira(Number(lastClosedShift.actual_cash) || 0)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>Actual POS Settled:</span>
-                  <span className="font-bold">{formatNaira(Number(lastClosedShift.actual_pos) || 0)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span>Actual Transfers Settled:</span>
-                  <span className="font-bold">{formatNaira(Number(lastClosedShift.actual_transfers) || 0)}</span>
-                </div>
-              </div>
-              <p className="text-xs bg-primary/10 text-primary p-3 rounded-lg flex items-start gap-2">
-                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                By confirming, the next staff member will be prompted to start with ₦0 in all categories.
-              </p>
-              <div className="flex gap-2">
-                <Button variant="outline" className="w-full" onClick={() => setSettleModalOpen(false)}>
-                  Cancel
-                </Button>
-                <Button className="w-full font-bold" onClick={confirmSettle} disabled={settleLoading}>
-                  {settleLoading ? "Settling..." : "Confirm Settlement"}
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* Settle Day removed — settlement is now an Admin action in Shift Management */}
 
       {/* ── RX VERIFICATION DIALOG (Pharmacy only) ── */}
       <Dialog open={rxVerificationOpen} onOpenChange={(o) => { if (!o) { setRxVerificationOpen(false); setPharmacistPin(""); } }}>
@@ -1461,12 +1373,6 @@ export default function PosMode() {
                       {pt.shortCode} · {pt.customerName} · waiting {waitStr}
                     </div>
                   </div>
-                  <button
-                    onClick={() => dismissTransfer(pt.orderId)}
-                    className="h-6 w-6 rounded-full bg-black/20 grid place-items-center hover:bg-black/30 transition shrink-0"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
                 </div>
                 <div className="text-xs font-semibold mb-3 opacity-80">
                   {pt.items.slice(0, 3).map(i => `${i.qty}× ${i.name}`).join(", ")}{pt.items.length > 3 ? " ..." : ""}
@@ -1500,7 +1406,7 @@ export default function PosMode() {
               <CheckCircle2 className="h-5 w-5" /> Order Placed!
             </DialogTitle>
             <DialogDescription>
-              {successOrder?.shortCode} has been sent to the kitchen.
+              {successOrder?.shortCode} has been dispensed successfully.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">
@@ -1516,10 +1422,12 @@ export default function PosMode() {
                 <span>Total</span>
                 <span className="text-primary">{formatNaira(successOrder?.total || 0)}</span>
               </div>
-              <div className="flex justify-between text-xs text-muted-foreground mt-2 border-t border-border pt-2">
-                <span>Order Type</span>
-                <span className="font-semibold">{successOrder?.orderIntent === "takeaway" ? "Takeaway" : successOrder?.orderIntent === "mixed" ? "Mixed" : "Dine In"}</span>
-              </div>
+              {!isPharmacy && (
+                <div className="flex justify-between text-xs text-muted-foreground mt-2 border-t border-border pt-2">
+                  <span>Order Type</span>
+                  <span className="font-semibold">{successOrder?.orderIntent === "takeaway" ? "Walk-in" : successOrder?.orderIntent === "mixed" ? "Mixed" : "Delivery"}</span>
+                </div>
+              )}
               <div className="flex justify-between text-xs text-muted-foreground">
                 <span>Payment</span>
                 <span>{successOrder?.paymentMethod === "cash" ? "Cash" : successOrder?.paymentMethod === "pos_terminal" ? "POS Terminal" : "Bank Transfer"}</span>

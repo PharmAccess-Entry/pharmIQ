@@ -82,6 +82,7 @@ export default function Analytics() {
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<any[]>([]);
   const [costMap, setCostMap] = useState<Map<string, number>>(new Map());
+  const [totalExpenses, setTotalExpenses] = useState(0);
 
   useEffect(() => {
     if (!rid || !date?.from) return;
@@ -105,6 +106,16 @@ export default function Analytics() {
         const cm = new Map<string, number>();
         (menuData || []).forEach((m: any) => cm.set(m.id, Number(m.cost_price) || 0));
         setCostMap(cm);
+
+        // Fetch expenses for the selected date range
+        const { data: expData } = await supabase
+          .from("expenses")
+          .select("amount")
+          .eq("restaurant_id", rid)
+          .gte("expense_date", startOfDay(date.from).toISOString().split('T')[0])
+          .lte("expense_date", endOfDay(toDate).toISOString().split('T')[0]);
+        const expTotal = (expData || []).reduce((sum: number, e: any) => sum + Number(e.amount), 0);
+        setTotalExpenses(expTotal);
       } catch (err) {
         console.error(err);
         toast.error("Failed to load analytics data");
@@ -144,9 +155,9 @@ export default function Analytics() {
         .from("shifts")
         .select("*")
         .eq("restaurant_id", rid)
-        .gte("created_at", startOfDay(date.from).toISOString())
-        .lte("created_at", endOfDay(toDate).toISOString())
-        .order("created_at", { ascending: false });
+        .gte("start_time", startOfDay(date.from).toISOString())
+        .lte("start_time", endOfDay(toDate).toISOString())
+        .order("start_time", { ascending: false });
       
       if (shiftsData) {
         setShifts(shiftsData);
@@ -197,7 +208,8 @@ export default function Analytics() {
     let sum = 0;
     successfulOrders.forEach(o => {
       o.order_items?.forEach((item: any) => {
-        const cost = costMap.get(item.menu_item_id) || 0;
+        // Prefer the snapshot cost_price stored on the order_item; fall back to current cost_price from costMap
+        const cost = (item.cost_price != null && item.cost_price > 0) ? Number(item.cost_price) : (costMap.get(item.menu_item_id) || 0);
         sum += (item.qty || 0) * cost;
       });
     });
@@ -205,6 +217,7 @@ export default function Analytics() {
   }, [successfulOrders, costMap]);
 
   const grossProfit = totalRevenue - totalCogs;
+  const netProfit = grossProfit - totalExpenses;
   const grossMargin = totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0;
 
   // Chart Data
@@ -260,7 +273,7 @@ export default function Analytics() {
       .slice(0, 10);
   }, [successfulOrders]);
 
-  // Top Tables
+  // Sales Channels
   const topTables = useMemo(() => {
     const tableCounts: Record<string, { table: string; orders: number; revenue: number }> = {};
     successfulOrders.forEach(o => {
@@ -358,7 +371,7 @@ export default function Analytics() {
 
   return (
     <DashboardLayout>
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+      <div className="flex flex-col gap-4 mb-8">
         <div>
           <h1 className="font-display text-3xl font-bold">Analytics & Reports</h1>
           <p className="text-muted-foreground mt-1">Deep dive into your sales and top performing items.</p>
@@ -454,7 +467,8 @@ export default function Analytics() {
           </div>
 
           {!loading && (
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="bg-card border border-border rounded-xl p-4 shadow-sm flex items-center justify-between">
                 <div>
                   <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1">Cost of Goods (COGS)</div>
@@ -482,6 +496,29 @@ export default function Analytics() {
                   <FileText className="h-5 w-5" />
                 </div>
               </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="bg-card border border-border rounded-xl p-4 shadow-sm flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1">Operating Expenses</div>
+                  <div className="font-display text-xl font-bold text-destructive">{formatNaira(totalExpenses)}</div>
+                  <div className="text-xs text-muted-foreground mt-1">Logged in the Expenses module</div>
+                </div>
+                <div className="h-10 w-10 rounded-full bg-destructive/10 flex items-center justify-center text-destructive">
+                  <DollarSign className="h-5 w-5" />
+                </div>
+              </div>
+              <div className={`border rounded-xl p-4 shadow-sm flex items-center justify-between ${netProfit >= 0 ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-destructive/5 border-destructive/20'}`}>
+                <div>
+                  <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-1">Net Profit</div>
+                  <div className={`font-display text-xl font-bold ${netProfit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive'}`}>{formatNaira(netProfit)}</div>
+                  <div className="text-xs text-muted-foreground mt-1">Gross Profit − Expenses</div>
+                </div>
+                <div className={`h-10 w-10 rounded-full flex items-center justify-center ${netProfit >= 0 ? 'bg-emerald-500/10 text-emerald-500' : 'bg-destructive/10 text-destructive'}`}>
+                  <TrendingUp className="h-5 w-5" />
+                </div>
+              </div>
+            </div>
             </div>
           )}
 
@@ -588,13 +625,13 @@ export default function Analytics() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-            {/* Top Tables */}
+            {/* Sales Channels */}
             <div className="bg-card border border-border rounded-2xl shadow-soft p-5">
               <div className="mb-4">
                 <h2 className="font-display text-lg font-semibold flex items-center gap-2">
-                  <MapPin className="h-4 w-4 text-primary" /> Top Tables
+                  <MapPin className="h-4 w-4 text-primary" /> Sales Channels
                 </h2>
-                <p className="text-xs text-muted-foreground">Most active tables by order count</p>
+                <p className="text-xs text-muted-foreground">Most active channels by order count</p>
               </div>
               {loading ? (
                 <div className="flex justify-center py-8"><div className="h-6 w-6 rounded-full border-2 border-primary border-t-transparent animate-spin" /></div>
@@ -609,7 +646,7 @@ export default function Analytics() {
                             <div className="h-7 w-7 rounded-lg bg-primary/10 text-primary text-xs font-black grid place-items-center shrink-0">
                               #{i + 1}
                             </div>
-                            <span className="text-sm font-semibold">Table {t.table}</span>
+                            <span className="text-sm font-semibold">{t.table}</span>
                           </div>
                           <div className="text-right">
                             <span className="text-sm font-bold text-primary">{t.orders} orders</span>
@@ -629,7 +666,7 @@ export default function Analytics() {
               ) : (
                 <div className="flex flex-col items-center justify-center text-center p-6 text-muted-foreground">
                   <MapPin className="h-8 w-8 opacity-20 mb-2" />
-                  <p className="text-sm">No table data for this period</p>
+                  <p className="text-sm">No channel data for this period</p>
                 </div>
               )}
             </div>
@@ -748,7 +785,7 @@ export default function Analytics() {
                             </TableCell>
                             <TableCell className="text-right font-medium">{formatNaira(Number(shift.start_cash) || 0)}</TableCell>
                             <TableCell className="text-right">
-                              {shift.status === "completed" ? (
+                              {(shift.status === "completed" || shift.status === "settled") ? (
                                 <div className="text-xs space-y-0.5">
                                   <div>Cash: {formatNaira(expectedCash)}</div>
                                   <div className="text-muted-foreground">POS: {formatNaira(expectedPos)}</div>
@@ -757,7 +794,7 @@ export default function Analytics() {
                               ) : "—"}
                             </TableCell>
                             <TableCell className="text-right">
-                              {shift.status === "completed" ? (
+                              {(shift.status === "completed" || shift.status === "settled") ? (
                                 <div className="text-xs space-y-0.5">
                                   <div>Cash: {formatNaira(actualCash)}</div>
                                   <div className="text-muted-foreground">POS: {formatNaira(actualPos)}</div>
@@ -766,7 +803,7 @@ export default function Analytics() {
                               ) : "—"}
                             </TableCell>
                             <TableCell className="text-right">
-                              {shift.status === "completed" ? (
+                              {(shift.status === "completed" || shift.status === "settled") ? (
                                 <span className={`font-bold text-sm whitespace-nowrap ${isShort ? "text-destructive" : isOver ? "text-amber-500" : "text-green-600"}`}>
                                   {isShort ? `▼ ${formatNaira(Math.abs(totalVariance))} SHORT` : isOver ? `▲ ${formatNaira(Math.abs(totalVariance))} OVER` : "✓ BALANCED"}
                                 </span>

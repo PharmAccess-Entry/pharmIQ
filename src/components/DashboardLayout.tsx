@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { LayoutDashboard, UtensilsCrossed, QrCode, ClipboardList, Settings, Menu, LogOut, Bell, Calendar, Monitor, MessageSquareText, HelpCircle, Compass, TrendingUp, ShoppingBag, Package, AlertTriangle, ChevronDown, Pill, User, Truck, FileText, ShieldAlert, Users, Briefcase, Receipt, ListChecks, RefreshCw, Printer } from "lucide-react";
+import { LayoutDashboard, UtensilsCrossed, QrCode, ClipboardList, Settings, Menu, LogOut, Bell, Calendar, Monitor, MessageSquareText, HelpCircle, Compass, TrendingUp, ShoppingBag, Package, AlertTriangle, ChevronDown, Pill, User, Truck, FileText, ShieldAlert, Users, Briefcase, Receipt, ListChecks, RefreshCw, Printer, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -31,6 +31,7 @@ const sidebarNav = [
       { name: "Patients", to: "/dashboard/patients", icon: Users },
       { name: "Suppliers", to: "/dashboard/suppliers", icon: Briefcase },
       { name: "Purchases", to: "/dashboard/purchases", icon: Truck },
+      { name: "Shifts", to: "/dashboard/shifts", icon: Clock },
       { name: "Reconciliation", to: "/dashboard/reconciliation", icon: ListChecks },
       { name: "Expenses", to: "/dashboard/expenses", icon: Receipt },
       { name: "Audit Logs", to: "/dashboard/audit", icon: ListChecks },

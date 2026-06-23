@@ -178,7 +178,9 @@ export default function Patients() {
 
             <div className="mt-5 pt-4 border-t border-border/50 flex items-center justify-between text-xs text-muted-foreground">
               <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> Last Visit:</span>
-              <span className="font-medium text-foreground">{p.last_visit || "New Patient"}</span>
+              <span className="font-medium text-foreground">
+                {p.last_visit ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(new Date(p.last_visit)) : "New Patient"}
+              </span>
             </div>
           </div>
         ))}
@@ -203,6 +205,12 @@ export default function Patients() {
             <DialogTitle>{selectedPatient ? "Edit Patient Profile" : "Add New Patient"}</DialogTitle>
             <DialogDescription>Store medical history to ensure safe prescriptions.</DialogDescription>
           </DialogHeader>
+          {selectedPatient?.last_visit && (
+            <div className="bg-primary/5 border border-primary/10 rounded-lg p-3 mt-2 flex items-center justify-between text-sm">
+              <span className="text-muted-foreground flex items-center gap-1.5"><Calendar className="w-4 h-4"/> Last Pharmacy Visit:</span>
+              <span className="font-semibold text-primary">{new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(new Date(selectedPatient.last_visit))}</span>
+            </div>
+          )}
           <form onSubmit={handleSave} className="space-y-4 pt-4">
             <div className="space-y-2">
               <Label htmlFor="name">Full Name</Label>

@@ -6,6 +6,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { CustomDatePicker } from "@/components/ui/custom-date-picker";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useRestaurant } from "@/lib/restaurant";
@@ -159,7 +161,7 @@ export default function Expenses() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
+            <table className="w-full text-sm text-left [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap">
               <thead className="bg-secondary/50 text-muted-foreground font-medium border-b border-border">
                 <tr>
                   <th className="py-3 px-4">Date</th>
@@ -188,7 +190,7 @@ export default function Expenses() {
                         {new Date(expense.expense_date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
                       </td>
                       <td className="py-3 px-4">
-                        <span className="bg-secondary px-2.5 py-1 rounded-md text-xs font-medium border border-border/50">
+                        <span className="inline-block whitespace-nowrap bg-secondary px-2.5 py-1 rounded-md text-xs font-medium border border-border/50">
                           {expense.category}
                         </span>
                       </td>
@@ -220,11 +222,10 @@ export default function Expenses() {
             <div className="space-y-4 py-2">
               <div>
                 <Label>Date</Label>
-                <Input 
-                  type="date" 
+                <CustomDatePicker 
                   value={form.expense_date}
-                  onChange={e => setForm({...form, expense_date: e.target.value})}
-                  className="mt-1.5"
+                  onChange={(val) => setForm({...form, expense_date: val})}
+                  className="mt-1.5 w-full"
                 />
               </div>
               <div>
@@ -238,14 +239,11 @@ export default function Expenses() {
               </div>
               <div>
                 <Label>Amount (₦)</Label>
-                <Input 
-                  type="number" 
-                  min="0"
-                  step="0.01"
-                  value={form.amount}
-                  onChange={e => setForm({...form, amount: e.target.value})}
-                  placeholder="e.g. 5000"
-                  className="mt-1.5"
+                <CurrencyInput 
+                  value={form.amount} 
+                  onChange={(val) => setForm({...form, amount: val})}
+                  placeholder="0" 
+                  className="mt-1.5 w-full"
                 />
               </div>
               <div>

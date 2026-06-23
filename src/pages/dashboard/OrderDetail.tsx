@@ -2,19 +2,13 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Send, Check, X, MessageCircle, Minus, Plus, AlertTriangle, Printer, Download } from "lucide-react";
+import { ArrowLeft, Check, X, Minus, Plus, AlertTriangle, Printer, Download } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { StatusPill } from "./Dashboard";
-import { IntentBadge } from "./Orders";
 import { supabase } from "@/integrations/supabase/client";
-// rid comes from order row
 import { formatNaira } from "@/lib/format";
 import { RealTimeAgo } from "@/components/RealTimeAgo";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { createNotification } from "@/lib/useNotifications";
 import { OrderDetailSkeleton } from "@/components/LoadingState";
 import { Receipt } from "@/components/Receipt";
 import html2canvas from "html2canvas";
@@ -22,7 +16,6 @@ import { useRef } from "react";
 
 type Order = any;
 type OrderItem = { id: string; name: string; qty: number; price: number; item_intent: string | null; selected_option: string | null; notes: string | null; bundle_id?: string | null };
-type Message = { id: string; sender: string; kind: string; body: string | null; payload: any; created_at: string; read_at: string | null };
 
 export const OrderDetail = () => {
   const { id } = useParams();
@@ -30,23 +23,15 @@ export const OrderDetail = () => {
   const [notFound, setNotFound] = useState(false);
   const [order, setOrder] = useState<Order | null>(null);
   const [items, setItems] = useState<OrderItem[]>([]);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [chatOpen, setChatOpen] = useState(false);
   const [restaurant, setRestaurant] = useState<any>(null);
-  const [chatBody, setChatBody] = useState("");
-  const [offerItem, setOfferItem] = useState<string>("");
-  const [offerQty, setOfferQty] = useState<number>(1);
-  const [customerTyping, setCustomerTyping] = useState(false);
-  const typingChannelRef = useRef<any>(null);
-  const typingTimerRef = useRef<any>(null);
-  const sendTypingTimerRef = useRef<any>(null);
-  const chatEndRef = useRef<HTMLDivElement>(null);
   const [shortageItem, setShortageItem] = useState<OrderItem | null>(null);
   const [shortageQty, setShortageQty] = useState<number>(0);
   const [processedByName, setProcessedByName] = useState<string | null>(null);
   const [collectingPayment, setCollectingPayment] = useState(false);
   const [refundingOrder, setRefundingOrder] = useState(false);
   const [restockInventory, setRestockInventory] = useState(true);
+  
+  const { role } = useRestaurant();
   
   const receiptRef = useRef<HTMLDivElement>(null);
 
@@ -77,19 +62,16 @@ export const OrderDetail = () => {
   useEffect(() => {
     if (!id) return;
     const load = async () => {
-      const [{ data: o }, { data: it }, { data: m }] = await Promise.all([
+      const [{ data: o }, { data: it }] = await Promise.all([
         supabase.from("orders").select("*").eq("id", id).maybeSingle(),
         supabase.from("order_items").select("*").eq("order_id", id),
-        supabase.from("order_messages").select("*").eq("order_id", id).order("created_at"),
       ]);
       setOrder(o);
       setItems((it as OrderItem[]) || []);
-      setMessages((m as Message[]) || []);
       if (o?.restaurant_id) {
         const { data: r } = await supabase.from("restaurants").select("*").eq("id", o.restaurant_id).maybeSingle();
         setRestaurant(r);
       }
-      // Fetch the name of whoever processed the order
       if (o?.processed_by) {
         const { data: users } = await supabase.rpc("get_users_by_ids", { user_ids: [o.processed_by] });
         if (users && users[0]) {
@@ -101,7 +83,6 @@ export const OrderDetail = () => {
     };
     load();
 
-    // Separate channel for order & order_items (triggers full reload)
     const orderCh = supabase
       .channel(`order-meta-${id}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "orders" }, (payload) => {
@@ -113,70 +94,12 @@ export const OrderDetail = () => {
       })
       .subscribe();
 
-    // Dedicated channel for messages — updates state directly, no full reload
-    const msgCh = supabase
-      .channel(`order-msgs-${id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "order_messages" }, (payload) => {
-        const m = (payload.new || payload.old) as any;
-        if (!m || m.order_id !== id) return;
-        if (payload.eventType === "INSERT") {
-          setMessages((prev) => prev.find(x => x.id === m.id) ? prev : [...prev, m]);
-          if (m.sender === "customer") {
-            try { (navigator as any).vibrate?.(100); } catch { /* noop */ }
-            if (m.kind === "accepted") toast.success(`Customer accepted: ${m.body || ""}`);
-            else if (m.kind === "rejected") toast.warning(`Customer declined: ${m.body || ""}`);
-            else toast.info("New message from customer", { description: m.body || "" });
-          }
-        } else if (payload.eventType === "UPDATE") {
-          setMessages((prev) => prev.map(x => x.id === m.id ? { ...x, ...m } : x));
-        } else if (payload.eventType === "DELETE") {
-          setMessages((prev) => prev.filter(x => x.id !== m.id));
-        }
-      })
-      .subscribe((status) => {
-        if (status === "CHANNEL_ERROR") console.warn("order_messages realtime error — is it in the publication?");
-      });
-
     return () => {
       supabase.removeChannel(orderCh);
-      supabase.removeChannel(msgCh);
     };
   }, [id]);
 
-  // Typing indicator + read receipts via realtime broadcast
-  useEffect(() => {
-    if (!id) return;
-    const ch = supabase.channel(`typing-${id}`, { config: { broadcast: { self: false } } });
-    ch.on("broadcast", { event: "typing" }, (p) => {
-      if ((p.payload as any)?.from === "customer") {
-        setCustomerTyping(true);
-        clearTimeout(typingTimerRef.current);
-        typingTimerRef.current = setTimeout(() => setCustomerTyping(false), 2500);
-      }
-    }).subscribe();
-    typingChannelRef.current = ch;
-    return () => { supabase.removeChannel(ch); clearTimeout(typingTimerRef.current); };
-  }, [id]);
-
-  // Mark unread customer messages as read whenever they arrive
-  useEffect(() => {
-    const unread = messages.filter((m) => m.sender === "customer" && !m.read_at).map((m) => m.id);
-    if (unread.length === 0) return;
-    supabase.from("order_messages").update({ read_at: new Date().toISOString() }).in("id", unread).then(() => { });
-  }, [messages]);
-
-  // Auto-scroll chat to bottom on new messages
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const onChatChange = (v: string) => {
-    setChatBody(v);
-    if (!typingChannelRef.current) return;
-    if (sendTypingTimerRef.current) return;
-    typingChannelRef.current.send({ type: "broadcast", event: "typing", payload: { from: "staff" } });
-    sendTypingTimerRef.current = setTimeout(() => { sendTypingTimerRef.current = null; }, 1500);
-  };
+  // No chat state or effects needed — messages feature removed
 
   if (!order) {
     if (loading) return <DashboardLayout><OrderDetailSkeleton /></DashboardLayout>;
@@ -192,61 +115,82 @@ export const OrderDetail = () => {
   }
 
   const advance = async (status: string) => {
+    const originalOrder = { ...order };
     // Optimistic UI update
     setOrder({ ...order, status, acknowledged: true });
 
-    const { data: { user } } = await supabase.auth.getUser();
-    await supabase.from("orders").update({
-      status,
-      acknowledged: true,
-      processed_by: user?.id,
-      processed_at: new Date().toISOString()
-    }).eq("id", order.id);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { error } = await supabase.from("orders").update({
+        status,
+        acknowledged: true
+      }).eq("id", order.id);
 
-    toast.success(`Status: ${status.replace("_", " ")}`);
+      if (error) throw error;
+      toast.success(`Status: ${status.replace("_", " ")}`);
+    } catch (err: any) {
+      console.error("Failed to advance order:", err);
+      toast.error("Failed to update status", { description: err.message });
+      setOrder(originalOrder); // Rollback
+    }
   };
 
   const collectPaymentAndServe = async (method: "cash_paid" | "pos_paid" | "confirmed") => {
-    setCollectingPayment(false);
-    setOrder({ ...order, payment_status: method });
-    const { data: { user } } = await supabase.auth.getUser();
-    await supabase.from("orders").update({
-      payment_status: method,
-      processed_by: user?.id,
-      processed_at: new Date().toISOString(),
-    }).eq("id", order.id);
-    toast.success("Payment recorded ✓");
-  };
+      try {
+        setOrder((prev: any) => ({ ...prev, status: "completed", payment_status: method, acknowledged: true }));
+        const { data: { user } } = await supabase.auth.getUser();
+        const { error } = await supabase.from("orders").update({
+          status: "completed",
+          payment_status: method,
+          acknowledged: true
+        }).eq("id", id);
+        if (error) throw error;
+        toast.success("Transfer confirmed ✓ Order moved to Completed");
+        setCollectingPayment(false);
+      } catch (e: any) {
+        toast.error("Failed to collect payment", { description: e.message });
+      }
+    };
 
   const processRefund = async () => {
     const { data: { user } } = await supabase.auth.getUser();
-    
-    // Update order status
-    await supabase.from("orders").update({
-      status: "refunded",
-      payment_status: "refunded",
-      processed_by: user?.id,
-      processed_at: new Date().toISOString(),
-    }).eq("id", order.id);
+    if (!user || !order) return;
 
-    // Handle inventory restock
-    if (restockInventory) {
-      for (const item of items) {
-        // Find the actual menu item to get its current stock
-        const { data: menuItem } = await supabase.from("menu_items").select("id, stock_quantity, track_inventory").eq("name", item.name).eq("restaurant_id", order.restaurant_id).maybeSingle();
-        
-        if (menuItem && menuItem.track_inventory) {
-          const newQty = (menuItem.stock_quantity || 0) + item.qty;
-          await supabase.from("menu_items").update({ stock_quantity: newQty }).eq("id", menuItem.id);
-          
-          await supabase.from("inventory_logs").insert({
-            restaurant_id: order.restaurant_id,
-            menu_item_id: menuItem.id,
-            change_qty: item.qty,
-            reason: `refund - order ${order.short_code}`,
-          });
-        }
-      }
+    // Fetch the current active shift for this user so the refund cash event
+    // Use the unified process_refund RPC — single authoritative mutation path.
+    // We MUST pass an active shift ID because the DB now strictly requires it.
+    let activeShiftId: string | null = null;
+    try {
+      const { data: activeShift } = await supabase
+        .from("shifts")
+        .select("id")
+        .eq("restaurant_id", order.restaurant_id)
+        .eq("user_id", user.id)
+        .eq("status", "active")
+        .limit(1)
+        .maybeSingle();
+      activeShiftId = activeShift?.id || null;
+    } catch (_) {
+      // Ignore select errors
+    }
+
+    if (!activeShiftId) {
+      toast.error("You must have an active shift to process a refund.");
+      setRefundingOrder(false);
+      return;
+    }
+
+    // This produces exactly ONE inventory_log entry per restocked item
+    const { data, error } = await supabase.rpc("process_refund", {
+      p_order_id: order.id,
+      p_user_id: user.id,
+      p_restock: restockInventory,
+      p_shift_id: activeShiftId,
+    });
+
+    if (error) {
+      toast.error("Refund failed: " + error.message);
+      return;
     }
 
     setOrder({ ...order, status: "refunded", payment_status: "refunded" });
@@ -393,14 +337,13 @@ export const OrderDetail = () => {
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <div>
                 <h1 className="font-display text-2xl font-bold">{order.short_code}</h1>
-                <p className="text-sm text-muted-foreground">Placed <RealTimeAgo date={order.created_at} /> · Table {order.table_number} · <span className="font-bold text-primary">{order.customer_name || `Guest #${order.short_code.slice(-3)}`}</span></p>
+                <p className="text-sm text-muted-foreground">Dispensed <RealTimeAgo date={order.created_at} /> · <span className="font-bold text-primary">{order.customer_name || `Guest #${order.short_code.slice(-3)}`}</span></p>
                 {processedByName && (
                   <p className="text-xs text-muted-foreground mt-0.5">Handled by <span className="font-semibold text-foreground">{processedByName}</span></p>
                 )}
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 <StatusPill status={order.status} />
-                <IntentBadge intent={order.intent} />
               </div>
             </div>
 
@@ -423,7 +366,7 @@ export const OrderDetail = () => {
                             <div className="flex items-center gap-1.5 shrink-0 flex-wrap mt-0.5 sm:mt-0">
                               {order.intent === "mixed" && i.item_intent && (
                                 <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-black uppercase tracking-widest ${i.item_intent === "eat-here" ? "bg-green-500/10 text-green-600" : "bg-amber-500/10 text-amber-600"}`}>
-                                  {i.item_intent === "eat-here" ? "🍽️ Dine In" : "📦 Takeaway"}
+                                  {i.item_intent === "eat-here" ? "🚚 Delivery" : "🛍️ Walk-in"}
                                 </span>
                               )}
                               {i.selected_option && (
@@ -466,80 +409,23 @@ export const OrderDetail = () => {
             </div>
           </div>
 
-          {/* Chat Button */}
-          <Button 
-            variant="outline" 
-            className="w-full h-14 rounded-2xl border-primary/20 text-primary shadow-soft mt-6"
-            onClick={() => setChatOpen(true)}
-          >
-            <MessageCircle className="h-5 w-5 mr-2" />
-            Customer Messages
-            {messages.filter(m => m.sender === 'customer' && !m.read_at).length > 0 && (
-              <span className="ml-2 h-2 w-2 rounded-full bg-primary animate-pulse" />
-            )}
-          </Button>
-
-          <Sheet open={chatOpen} onOpenChange={setChatOpen}>
-            <SheetContent side="bottom" className="h-[75vh] sm:max-w-xl mx-auto rounded-t-[3rem] p-0 flex flex-col border-none shadow-elevated">
-              <div className="p-8 pb-4 border-b border-border">
-                <SheetHeader className="text-left">
-                  <SheetTitle className="font-display text-2xl font-black flex items-center gap-3">
-                    <MessageCircle className="h-8 w-8 text-primary" /> Customer Chat
-                  </SheetTitle>
-                  <SheetDescription className="text-[10px] text-muted-foreground uppercase tracking-widest font-black">
-                    Order #{order.short_code}
-                  </SheetDescription>
-                </SheetHeader>
-              </div>
-              <div className="flex-1 overflow-y-auto p-8 pt-4 space-y-4 pr-3 scrollbar-thin scrollbar-thumb-border">
-                {messages.length === 0 && <p className="text-sm text-muted-foreground py-6 text-center">No messages yet.</p>}
-                {messages.map((m) => {
-                  const isStaff = m.sender === "staff";
-                  return (
-                    <div key={m.id} className={`flex ${isStaff ? "justify-end" : "justify-start"}`}>
-                      <div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm font-medium ${isStaff ? "bg-primary text-primary-foreground" : "bg-secondary"}`}>
-                        <div className="text-[10px] opacity-70 mb-0.5 uppercase tracking-wide font-bold">{isStaff ? "You" : "Customer"}</div>
-                        <div>{m.body}</div>
-                        <div className="text-[10px] opacity-60 mt-1 flex items-center gap-1">
-                          <span><RealTimeAgo date={m.created_at} /></span>
-                          {isStaff && (
-                            <span aria-label={m.read_at ? "Read" : "Sent"} className="font-bold">
-                              {m.read_at ? "✓✓" : "✓"}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-                <div ref={chatEndRef} />
-              </div>
-              <div className="p-8 pt-4 bg-card border-t border-border">
-                {customerTyping && <div className="text-[10px] text-primary font-bold animate-pulse mb-2 px-1">Customer is typing...</div>}
-                <div className="flex gap-3">
-                  <Textarea value={chatBody} onChange={(e) => onChatChange(e.target.value)} placeholder="Message the customer…" className="min-h-[56px] rounded-2xl resize-none py-4" rows={1} />
-                  <Button onClick={sendMessage} className="h-14 w-14 rounded-2xl shadow-glow shrink-0"><Send className="h-6 w-6" /></Button>
-                </div>
-              </div>
-            </SheetContent>
-          </Sheet>
         </div>
 
         {/* Side actions */}
         <div className="space-y-4">
           <div className="bg-card border border-border rounded-2xl p-5 shadow-soft">
-            <h3 className="font-display font-semibold mb-3">Kitchen workflow</h3>
+            <h3 className="font-display font-semibold mb-3">Processing workflow</h3>
             <div className="space-y-2">
               {order.status === "pending" && (
-                <Button variant="hero" className="w-full h-auto py-3 text-base sm:text-lg whitespace-normal leading-tight" onClick={() => advance("preparing")}>Start Preparing</Button>
+                <Button variant="hero" className="w-full h-auto py-3 text-base sm:text-lg whitespace-normal leading-tight" onClick={() => advance("preparing")}>Start Dispensing</Button>
               )}
               {order.status === "preparing" && (
-                <Button variant="hero" className="w-full h-12 text-lg bg-blue-600 hover:bg-blue-700" onClick={() => advance("served")}>Mark as Served</Button>
+                <Button variant="hero" className="w-full h-12 text-lg bg-blue-600 hover:bg-blue-700" onClick={() => advance("completed")}>Mark as Dispensed</Button>
               )}
-              {order.status === "served" && order.payment_status !== "unpaid" && (
+              {(order.status === "completed" || (order.status === "served" && order.payment_status !== "unpaid")) && (
                 <div className="bg-primary/10 text-primary rounded-xl p-4 text-center">
                   <div className="text-2xl mb-1 text-primary">✅</div>
-                  <div className="font-bold">Order Served</div>
+                  <div className="font-bold">Sale Completed</div>
                   <p className="text-xs opacity-80">
                     {order.payment_status === "cash_paid" ? "Paid by Cash" :
                      order.payment_status === "pos_paid" ? "Paid via POS Terminal" :
@@ -551,13 +437,17 @@ export const OrderDetail = () => {
                 <div className="space-y-2">
                   <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-center">
                     <div className="text-base mb-1">⏳</div>
-                    <div className="font-bold text-amber-600 text-sm">Awaiting Payment</div>
-                    <p className="text-xs text-amber-600/80 mt-0.5">Food served — collect payment below</p>
+                    <div className="font-bold text-amber-600 text-sm">Awaiting Transfer Confirmation</div>
+                    <p className="text-xs text-amber-600/80 mt-0.5">Meds dispensed — confirm transfer receipt below</p>
                   </div>
-                  <Button className="w-full h-11 rounded-xl font-bold bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => setCollectingPayment(true)}>Collect Payment</Button>
+                  {(role === "owner" || role === "manager") ? (
+                    <Button className="w-full h-11 rounded-xl font-bold bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => setCollectingPayment(true)}>Confirm Payment</Button>
+                  ) : (
+                    <div className="w-full h-11 flex items-center justify-center rounded-xl font-bold bg-amber-500/20 text-amber-600">Awaiting Cashier</div>
+                  )}
                 </div>
               )}
-              {order.status !== "cancelled" && order.status !== "refunded" && order.status !== "served" && (
+              {order.status !== "cancelled" && order.status !== "refunded" && order.status !== "served" && order.status !== "completed" && (
                 <Button variant="ghost" className="w-full text-destructive mt-4" onClick={() => advance("cancelled")}><X className="h-4 w-4" /> Cancel Order</Button>
               )}
               {order.status === "served" && (
@@ -597,8 +487,8 @@ export const OrderDetail = () => {
             </div>
 
             <div className="bg-card border border-border rounded-2xl p-4 shadow-soft">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">Customer</h4>
-              <div className="text-sm font-medium">{order.customer_name || `Guest at Table ${order.table_number}`}</div>
+              <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">Patient</h4>
+              <div className="text-sm font-medium">{order.customer_name || `Walk-in Patient`}</div>
               {order.customer_phone && <div className="text-xs text-muted-foreground font-mono">{order.customer_phone}</div>}
             </div>
           </div>
@@ -653,55 +543,43 @@ export const OrderDetail = () => {
 
       {/* Payment Collection Modal */}
       <Dialog open={collectingPayment} onOpenChange={(o) => !o && setCollectingPayment(false)}>
-        <DialogContent className="max-w-md rounded-[2rem] p-6 sm:p-8 max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-sm rounded-[2rem] p-6 sm:p-8">
           <DialogHeader className="text-center mb-2">
-            <DialogTitle className="font-display text-xl sm:text-2xl font-black uppercase tracking-wider">Collect Payment</DialogTitle>
+            <div className="text-4xl mb-3">🏦</div>
+            <DialogTitle className="font-display text-xl sm:text-2xl font-black uppercase tracking-wider">Confirm Transfer</DialogTitle>
             <DialogDescription className="font-medium text-xs sm:text-sm">
-              How did the customer pay? Select the payment channel to record and add to revenue.
+              Confirm you have received the bank transfer for this order.
             </DialogDescription>
           </DialogHeader>
 
           {/* Order summary */}
-          <div className="bg-secondary/50 rounded-2xl p-4 my-2 sm:my-4">
-            <div className="flex justify-between items-start mb-3 pb-3 border-b border-border/50">
+          <div className="bg-secondary/50 rounded-2xl p-4 my-2">
+            <div className="flex justify-between items-start">
               <div>
-                <div className="font-bold">{order?.customer_name || `Table ${order?.table_number}`}</div>
+                <div className="font-bold text-sm">{order?.customer_name || `Walk-in Patient`}</div>
                 <div className="text-xs text-muted-foreground">{order?.short_code}</div>
               </div>
               <div className="text-right">
                 <div className="font-display font-black text-xl text-primary">{formatNaira(total)}</div>
               </div>
             </div>
-            <div className="space-y-1 max-h-[120px] sm:max-h-[150px] overflow-y-auto pr-1 custom-scrollbar">
+            <div className="mt-3 pt-3 border-t border-border/50 space-y-1">
               {items.map((i, idx) => (
-                <div key={idx} className="text-xs flex justify-between">
-                  <span className="text-muted-foreground">{i.qty}× {i.name}</span>
-                  <span className="font-medium">{formatNaira(i.price * i.qty)}</span>
+                <div key={idx} className="text-xs text-muted-foreground">
+                  {i.qty}× {i.name}
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="grid gap-2 sm:gap-3">
+          <div className="grid gap-2 mt-2">
             <Button
-              className="h-12 sm:h-14 rounded-2xl text-sm sm:text-base font-bold bg-emerald-600 hover:bg-emerald-700 text-white"
-              onClick={() => collectPaymentAndServe("cash_paid")}
-            >
-              💵 Cash
-            </Button>
-            <Button
-              className="h-12 sm:h-14 rounded-2xl text-sm sm:text-base font-bold bg-blue-600 hover:bg-blue-700 text-white"
-              onClick={() => collectPaymentAndServe("pos_paid")}
-            >
-              💳 POS Terminal
-            </Button>
-            <Button
-              className="h-12 sm:h-14 rounded-2xl text-sm sm:text-base font-bold bg-indigo-600 hover:bg-indigo-700 text-white"
+              className="h-12 rounded-2xl font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-soft"
               onClick={() => collectPaymentAndServe("confirmed")}
             >
-              🏦 Bank Transfer
+              ✅ Yes, Transfer Received
             </Button>
-            <Button variant="ghost" className="h-10 sm:h-12 mt-1 rounded-xl text-muted-foreground" onClick={() => setCollectingPayment(false)}>Cancel</Button>
+            <Button variant="ghost" className="h-10 rounded-xl text-muted-foreground" onClick={() => setCollectingPayment(false)}>Cancel</Button>
           </div>
         </DialogContent>
       </Dialog>

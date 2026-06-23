@@ -9,6 +9,9 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { CustomDatePicker } from "@/components/ui/custom-date-picker";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { PackageOpen, Plus, Search, ArrowRight, Truck } from "lucide-react";
 
 export default function PurchaseHistory() {
@@ -191,7 +194,7 @@ export default function PurchaseHistory() {
 
         <div className="bg-card border border-border rounded-xl shadow-soft overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
+            <table className="w-full text-sm text-left [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap">
               <thead className="bg-secondary/50 text-xs uppercase text-muted-foreground border-b border-border">
                 <tr>
                   <th className="px-5 py-3 font-semibold">Date</th>
@@ -251,10 +254,14 @@ export default function PurchaseHistory() {
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5 col-span-2 sm:col-span-1">
                 <label className="text-xs font-bold uppercase text-muted-foreground">Supplier *</label>
-                <select required value={supplierId} onChange={e => setSupplierId(e.target.value)} className="w-full h-10 rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
-                  <option value="">Select supplier...</option>
-                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
+                <Select value={supplierId} onValueChange={setSupplierId}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select supplier..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-1.5 col-span-2 sm:col-span-1">
                 <label className="text-xs font-bold uppercase text-muted-foreground">Invoice Number</label>
@@ -264,10 +271,14 @@ export default function PurchaseHistory() {
 
             <div className="space-y-1.5">
               <label className="text-xs font-bold uppercase text-muted-foreground">Product (Drug) *</label>
-              <select required value={menuItemId} onChange={e => setMenuItemId(e.target.value)} className="w-full h-10 rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-primary">
-                <option value="">Select product to receive...</option>
-                {menuItems.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-              </select>
+              <Select value={menuItemId} onValueChange={setMenuItemId}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select product to receive..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {menuItems.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -277,18 +288,18 @@ export default function PurchaseHistory() {
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-bold uppercase text-muted-foreground">Expiry Date</label>
-                <Input type="date" value={expiryDate} onChange={e => setExpiryDate(e.target.value)} />
+                <CustomDatePicker value={expiryDate} onChange={setExpiryDate} placeholder="mm/dd/yyyy" className="w-full h-10" />
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-xs font-bold uppercase text-muted-foreground">Quantity Received *</label>
-                <Input type="number" required min="1" value={qty} onChange={e => setQty(e.target.value)} placeholder="0" />
+                <CurrencyInput required value={qty} onChange={setQty} placeholder="0" className="w-full h-10" />
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-bold uppercase text-muted-foreground">Unit Cost (₦) *</label>
-                <Input type="number" required min="0" value={costPrice} onChange={e => setCostPrice(e.target.value)} placeholder="0" />
+                <CurrencyInput required value={costPrice} onChange={setCostPrice} placeholder="0" className="w-full h-10" />
               </div>
             </div>
 

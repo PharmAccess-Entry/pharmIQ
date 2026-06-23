@@ -25,6 +25,13 @@ type ParsedRow = {
   Description: string;
   Price: number;
   CostPrice: number;
+  OpeningStock: number | null;  // null = blank (not the same as 0)
+  LowStockThreshold: number;
+  BatchNumber: string;
+  ExpiryDate: string;
+  Barcode: string;
+  RequiresPrescription: boolean;
+  Unit: string;
   Error?: string;
 };
 
@@ -36,10 +43,10 @@ export function MenuImportModal({ isOpen, onOpenChange, restaurantId, onSuccess,
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const templateRows = isPharmacy ? [
-    ["Category", "Name", "Description", "Price", "Cost Price"],
-    ["Antimalarials", "Artemether + Lumefantrine 80/480mg", "First-line ACT adult dose", 1500, 1000],
-    ["Analgesics & Pain Relief", "Paracetamol 500mg", "Standard pain relief", 200, 100],
-    ["Antibiotics & Antibacterials", "Amoxicillin 500mg", "Broad-spectrum antibiotic", 1000, 800],
+    ["Category", "Name", "Description", "Price", "Cost Price", "Opening Stock", "Unit", "Low Stock Threshold", "Batch Number", "Expiry Date", "Barcode", "Requires Prescription"],
+    ["Antimalarials", "Artemether + Lumefantrine 80/480mg", "First-line ACT adult dose", 1500, 1000, 50, "Tablet", 10, "BAT-001", "2026-12-31", "123456789", "Yes"],
+    ["Analgesics & Pain Relief", "Paracetamol 500mg", "Standard pain relief", 200, 100, 100, "Tablet", 20, "", "", "", "No"],
+    ["Antibiotics & Antibacterials", "Amoxicillin 500mg", "Broad-spectrum antibiotic", 1000, 800, 30, "Capsule", 5, "", "2025-06-30", "", "Yes"],
   ] : [
     ["Category", "Name", "Description", "Price", "Cost Price"],
     ["Swallow", "Pounded Yam", "Smooth and stretchy pounded yam", 1500, 500],
@@ -70,7 +77,9 @@ export function MenuImportModal({ isOpen, onOpenChange, restaurantId, onSuccess,
       }
     });
     // Set column widths
-    worksheet["!cols"] = [{ wch: 16 }, { wch: 22 }, { wch: 40 }, { wch: 10 }, { wch: 12 }];
+    worksheet["!cols"] = isPharmacy 
+      ? [{ wch: 16 }, { wch: 22 }, { wch: 30 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 18 }]
+      : [{ wch: 16 }, { wch: 22 }, { wch: 40 }, { wch: 10 }, { wch: 12 }];
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, isPharmacy ? "Inventory" : "Menu");
     XLSX.writeFile(workbook, isPharmacy ? "pharmiq_inventory_template.xlsx" : "smarttable_menu_template.xlsx");
@@ -114,7 +123,7 @@ export function MenuImportModal({ isOpen, onOpenChange, restaurantId, onSuccess,
       // Handle different possible column names (case insensitive matching)
       const getVal = (keys: string[]) => {
         const key = Object.keys(row).find(k => keys.some(match => k.toLowerCase().trim() === match));
-        return key ? row[key] : "";
+        return key ? row[key] : undefined;  // return undefined when column is absent
       };
 
       const category = getVal(["category", "group", "type"])?.toString().trim();
@@ -122,6 +131,14 @@ export function MenuImportModal({ isOpen, onOpenChange, restaurantId, onSuccess,
       const description = getVal(["description", "desc", "details"])?.toString().trim() || "";
       const rawPrice = getVal(["price", "cost", "amount", "retail price"]);
       const rawCostPrice = getVal(["cost price", "cost_price", "wholesale price", "buying price"]);
+      const rawOpeningStock = getVal(["opening stock", "stock", "qty", "quantity"]);
+      const rawLowStockThreshold = getVal(["low stock threshold", "threshold", "min stock", "alert level"]);
+      const batchNumber = getVal(["batch number", "batch", "lot"])?.toString().trim() || "";
+      const expiryDate = getVal(["expiry date", "expiry", "exp date", "expiration"])?.toString().trim() || "";
+      const barcode = getVal(["barcode", "upc", "ean"])?.toString().trim() || "";
+      const rawRequiresPrescription = getVal(["requires prescription", "prescription", "rx"]);
+      const rawUnit = getVal(["unit", "unit of measure", "uom"]);
+      const unit = rawUnit !== undefined && rawUnit !== null ? rawUnit.toString().trim() : "";
       
       let price = 0;
       if (rawPrice !== undefined && rawPrice !== null && rawPrice !== "") {
@@ -135,9 +152,32 @@ export function MenuImportModal({ isOpen, onOpenChange, restaurantId, onSuccess,
         if (!isNaN(parsed) && parsed >= 0) costPrice = parsed;
       }
 
+      // Opening stock: null = column missing or cell blank (NOT the same as 0)
+      let openingStock: number | null = null;
+      if (rawOpeningStock !== undefined && rawOpeningStock !== null && rawOpeningStock.toString().trim() !== "") {
+        const parsed = parseInt(rawOpeningStock.toString().replace(/,/g, ''));
+        if (!isNaN(parsed) && parsed >= 0) openingStock = parsed;
+      }
+
+      let lowStockThreshold = 5;
+      if (rawLowStockThreshold !== undefined && rawLowStockThreshold !== null && rawLowStockThreshold !== "") {
+        const parsed = parseInt(rawLowStockThreshold.toString().replace(/,/g, ''));
+        if (!isNaN(parsed) && parsed >= 0) lowStockThreshold = parsed;
+      }
+
+      let requiresPrescription = false;
+      if (rawRequiresPrescription !== undefined && rawRequiresPrescription !== null && rawRequiresPrescription !== "") {
+        const val = rawRequiresPrescription.toString().toLowerCase().trim();
+        if (val === 'yes' || val === 'true' || val === '1' || val === 'y') requiresPrescription = true;
+      }
+
       let error = undefined;
       if (!category) error = "Category is missing";
       else if (!name) error = "Name is missing";
+      else if (isPharmacy && price <= 0) error = "Selling price must be greater than 0";
+      else if (isPharmacy && costPrice <= 0) error = "Cost price must be greater than 0";
+      else if (isPharmacy && openingStock === null) error = "Opening stock is required — enter 0 if none in stock (blank is not allowed)";
+      else if (isPharmacy && !unit) error = "Unit of Measure is required (e.g. Tablet, Capsule, Pack)";
 
       return {
         Category: category,
@@ -145,6 +185,13 @@ export function MenuImportModal({ isOpen, onOpenChange, restaurantId, onSuccess,
         Description: description,
         Price: price,
         CostPrice: costPrice,
+        OpeningStock: openingStock,
+        LowStockThreshold: lowStockThreshold,
+        BatchNumber: batchNumber,
+        ExpiryDate: expiryDate,
+        Barcode: barcode,
+        RequiresPrescription: requiresPrescription,
+        Unit: unit,
         Error: error
       };
     });
@@ -182,22 +229,47 @@ export function MenuImportModal({ isOpen, onOpenChange, restaurantId, onSuccess,
       }
 
       // 2. Insert items
-      const payload = parsedData.map(row => ({
-        restaurant_id: restaurantId,
-        category: row.Category,
-        name: row.Name,
-        description: row.Description || null,
-        price: row.Price,
-        cost_price: row.CostPrice,
-        available: true,
-      }));
+      if (isPharmacy) {
+        // Use the bulk import RPC for pharmacy to handle stock, batches, and deduplication
+        const payload = parsedData.map(row => ({
+          category: row.Category,
+          name: row.Name,
+          description: row.Description || null,
+          price: row.Price,
+          cost_price: row.CostPrice,
+          opening_stock: row.OpeningStock ?? 0,
+          low_stock_threshold: row.LowStockThreshold,
+          batch_number: row.BatchNumber || null,
+          expiry_date: row.ExpiryDate || null,
+          barcode: row.Barcode || null,
+          requires_prescription: row.RequiresPrescription,
+          unit: row.Unit || null,
+        }));
 
-      // Insert in chunks of 100 to avoid request too large errors
-      const chunkSize = 100;
-      for (let i = 0; i < payload.length; i += chunkSize) {
-        const chunk = payload.slice(i, i + chunkSize);
-        const { error } = await supabase.from("menu_items").insert(chunk);
+        const { error } = await supabase.rpc("bulk_import_products", {
+          p_restaurant_id: restaurantId,
+          p_products: payload
+        });
+
         if (error) throw error;
+      } else {
+        const payload = parsedData.map(row => ({
+          restaurant_id: restaurantId,
+          category: row.Category,
+          name: row.Name,
+          description: row.Description || null,
+          price: row.Price,
+          cost_price: row.CostPrice,
+          available: true,
+        }));
+
+        // Insert in chunks of 100 to avoid request too large errors
+        const chunkSize = 100;
+        for (let i = 0; i < payload.length; i += chunkSize) {
+          const chunk = payload.slice(i, i + chunkSize);
+          const { error } = await supabase.from("menu_items").insert(chunk);
+          if (error) throw error;
+        }
       }
 
       toast.success(`Successfully imported ${parsedData.length} items!`);
@@ -328,6 +400,7 @@ export function MenuImportModal({ isOpen, onOpenChange, restaurantId, onSuccess,
                       <TableHead>Name</TableHead>
                       <TableHead>Price</TableHead>
                       <TableHead>Cost Price</TableHead>
+                      {isPharmacy && <TableHead>Init Stock</TableHead>}
                       <TableHead>Status</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -341,6 +414,7 @@ export function MenuImportModal({ isOpen, onOpenChange, restaurantId, onSuccess,
                         </TableCell>
                         <TableCell>{row.Price}</TableCell>
                         <TableCell>{row.CostPrice}</TableCell>
+                        {isPharmacy && <TableCell>{row.OpeningStock}</TableCell>}
                         <TableCell>
                           {row.Error ? (
                             <span className="text-xs font-semibold text-destructive flex items-center gap-1">

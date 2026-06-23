@@ -3,7 +3,7 @@ import { Cloud, CloudOff, RefreshCw, AlertCircle } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 export function SystemMonitor() {
-  const { isOnline, isSyncing, queueSize, lastSyncTime } = useOfflineSync();
+  const { isOnline, isSyncing, queueSize, lastSyncTime, triggerSync, clearQueue } = useOfflineSync();
 
   return (
     <div className="flex items-center space-x-4 bg-secondary/50 px-3 py-1.5 rounded-full border border-border/50 text-xs shadow-sm">
@@ -20,7 +20,12 @@ export function SystemMonitor() {
 
       <div className="w-px h-3 bg-border" />
 
-      <div className="flex items-center space-x-1.5">
+      <div 
+        className={`flex items-center space-x-1.5 ${queueSize > 0 ? "cursor-pointer hover:opacity-80" : ""}`}
+        onClick={() => queueSize > 0 && triggerSync()}
+        onDoubleClick={() => queueSize > 0 && clearQueue()}
+        title={queueSize > 0 ? "Click to retry sync. Double-click to clear queue." : ""}
+      >
         {isSyncing ? (
           <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />
         ) : queueSize > 0 ? (

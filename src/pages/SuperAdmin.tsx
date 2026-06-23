@@ -460,7 +460,7 @@ export default function SuperAdmin() {
               <Users className="h-4 w-4" />
             </div>
             <div className="font-display text-xl sm:text-2xl font-bold">{stats?.totalTables ?? 0}</div>
-            <div className="text-xs sm:text-sm text-muted-foreground mt-0.5">Total Tables</div>
+            <div className="text-xs sm:text-sm text-muted-foreground mt-0.5">Total Registers</div>
           </div>
 
           <div className="bg-card border border-border rounded-2xl p-4 sm:p-5 shadow-soft bg-primary-soft/30 border-primary/20">
@@ -535,13 +535,13 @@ export default function SuperAdmin() {
           </div>
 
           <div className="overflow-x-auto min-h-[400px]">
-            <table className="w-full text-sm text-left">
+            <table className="w-full text-sm text-left [&_td]:whitespace-nowrap [&_th]:whitespace-nowrap">
               <thead className="text-xs text-muted-foreground uppercase bg-secondary/50 border-b border-border">
                 <tr>
                   <th className="px-6 py-4 font-bold tracking-widest">Name / Email</th>
                   <th className="px-6 py-4 font-bold tracking-widest">Type</th>
                   <th className="px-6 py-4 font-bold tracking-widest">Status</th>
-                  <th className="px-6 py-4 font-bold tracking-widest">Tables</th>
+                  <th className="px-6 py-4 font-bold tracking-widest">Registers</th>
                   <th className="px-6 py-4 font-bold tracking-widest text-right">Actions</th>
                 </tr>
               </thead>
@@ -752,7 +752,7 @@ export default function SuperAdmin() {
                             )}
                           </div>
                         </div>
-                        <span className="text-sm font-black shrink-0">{selected.table_count ?? 0} Tables</span>
+                        <span className="text-sm font-black shrink-0">{selected.table_count ?? 0} Registers</span>
                       </div>
                       <div className="flex justify-between items-center pt-3 border-t border-primary/10">
                         <div className="flex items-center gap-2 text-primary shrink-0">

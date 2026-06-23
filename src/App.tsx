@@ -46,6 +46,7 @@ import Expenses from "./pages/dashboard/Expenses";
 import AuditLogs from "./pages/dashboard/AuditLogs";
 import SyncStatus from "./pages/dashboard/SyncStatus";
 import Reports from "./pages/dashboard/Reports";
+import ShiftManagement from "./pages/dashboard/ShiftManagement";
 
 const queryClient = new QueryClient();
 
@@ -107,6 +108,7 @@ const App = () => (
                     <Route path="/dashboard/orders" element={guard(<Orders />)} />
                     <Route path="/dashboard/orders/:id" element={guard(<OrderDetail />)} />
                     <Route path="/dashboard/inventory" element={managerGuard(<Inventory />)} />
+                    <Route path="/dashboard/shifts" element={managerGuard(<ShiftManagement />)} />
                     <Route path="/dashboard/analytics" element={managerGuard(<Analytics />)} />
                     <Route path="/dashboard/patients" element={guard(<Patients />)} />
                     <Route path="/dashboard/suppliers" element={managerGuard(<Suppliers />)} />

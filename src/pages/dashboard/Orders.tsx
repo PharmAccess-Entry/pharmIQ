@@ -27,34 +27,22 @@ type Order = {
   order_items?: { name: string; qty: number; item_intent: string | null }[];
 };
 
-const tabs = ["Active", "pending", "preparing", "awaiting_payment", "history"] as const;
+const tabs = ["completed", "pending", "pending_transfer"] as const;
 type Tab = (typeof tabs)[number];
 
-export const IntentBadge = ({ intent }: { intent: string }) => {
-  const map: Record<string, { label: string; icon: React.ComponentType<{ className?: string }>; cls: string }> = {
-    "dine-in": { label: "Dine-in", icon: UtensilsCrossed, cls: "bg-primary-soft text-primary" },
-    takeaway: { label: "Takeaway", icon: ShoppingBasket, cls: "bg-accent-soft text-accent" },
-    mixed: { label: "Mixed", icon: Shuffle, cls: "bg-secondary text-foreground" },
-  };
-  const m = map[intent] || map["dine-in"];
-  return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide ${m.cls}`}>
-      <m.icon className="h-3 w-3" /> {m.label}
-    </span>
-  );
-};
+// IntentBadge removed as per pharmacy workflow
 
 const PAGE_SIZE = 30;
 
 const Orders = () => {
-  const [tab, setTab] = useState<Tab>("Active");
+  const [tab, setTab] = useState<Tab>("completed");
   const [orders, setOrders] = useState<Order[]>([]);
   const [exportRange, setExportRange] = useState<"today" | "7d" | "30d" | "all" | "custom">("today");
   const [startDate, setStartDate] = useState<string>(new Date().toISOString().split("T")[0]);
   const [endDate, setEndDate] = useState<string>(new Date().toISOString().split("T")[0]);
   const [confirmServed, setConfirmServed] = useState<string | null>(null);
   const [collectingPayment, setCollectingPayment] = useState<Order | null>(null);
-  const { restaurant } = useRestaurant();
+  const { restaurant, role } = useRestaurant();
 
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
@@ -92,11 +80,9 @@ const Orders = () => {
       .select("id, short_code, table_number, intent, status, total, created_at, payment_status, customer_name, order_items(name, qty, price, item_intent)", { count: "exact" })
       .eq("restaurant_id", restaurant.id);
       
-    if (tab === "Active") {
-      q = q.or('status.in.(pending,preparing),and(status.eq.served,payment_status.eq.unpaid)');
-    } else if (tab === "history") {
-      q = q.or('status.in.(cancelled,refunded),and(status.eq.served,payment_status.neq.unpaid)');
-    } else if (tab === "awaiting_payment") {
+    if (tab === "completed") {
+      q = q.or('status.in.(cancelled,refunded,completed),and(status.eq.served,payment_status.neq.unpaid)');
+    } else if (tab === "pending_transfer") {
       q = q.eq("status", "served").eq("payment_status", "unpaid");
     } else {
       q = q.eq("status", tab);
@@ -145,9 +131,8 @@ const Orders = () => {
     if (!data) return;
 
     const pending = data.filter(o => o.status === "pending").length;
-    const preparing = data.filter(o => o.status === "preparing").length;
-    const awaiting_payment = data.filter(o => o.status === "served" && o.payment_status === "unpaid").length;
-    setCounts({ pending, preparing, awaiting_payment });
+    const pending_transfer = data.filter(o => o.status === "served" && o.payment_status === "unpaid").length;
+    setCounts({ pending, pending_transfer });
   };
 
   useEffect(() => {
@@ -203,37 +188,63 @@ const Orders = () => {
   }, [hasMore, isLoading, orders]);
 
   const advance = async (id: string, status: string) => {
+    const originalOrder = orders.find(o => o.id === id);
     // Optimistic UI update
     setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status, acknowledged: true } : o)));
     
-    const { data: { user } } = await supabase.auth.getUser();
-    await supabase.from("orders").update({ 
-      status, 
-      acknowledged: true,
-      processed_by: user?.id,
-      processed_at: new Date().toISOString()
-    }).eq("id", id);
-    
-    toast.success(`Order moved to ${status.replace("_", " ")}`);
-    fetchCounts();
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { error } = await supabase.from("orders").update({ 
+        status, 
+        acknowledged: true
+      }).eq("id", id);
+      
+      if (error) throw error;
+      
+      toast.success(`Order moved to ${status.replace("_", " ")}`);
+      fetchCounts();
+    } catch (err: any) {
+      console.error("Failed to advance order:", err);
+      toast.error("Failed to update status: " + err.message);
+      if (originalOrder) {
+        setOrders((prev) => prev.map((o) => (o.id === id ? originalOrder : o)));
+      }
+    }
   };
 
   const collectPaymentAndServe = async (orderId: string, method: "cash_paid" | "pos_paid" | "confirmed") => {
-    setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status: "served", payment_status: method, acknowledged: true } : o)));
-    const { data: { user } } = await supabase.auth.getUser();
-    await supabase.from("orders").update({
-      status: "served",
-      payment_status: method,
-      acknowledged: true,
-      processed_by: user?.id,
-      processed_at: new Date().toISOString(),
-    }).eq("id", orderId);
-    setCollectingPayment(null);
-    toast.success("Payment recorded ✓");
-    fetchCounts();
+    // Save original state for rollback
+    const originalOrder = orders.find(o => o.id === orderId);
+    
+    // Optimistic update
+    setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, status: "completed", payment_status: method, acknowledged: true } : o)));
+    
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { error } = await supabase.from("orders").update({
+        status: "completed",
+        payment_status: method,
+        acknowledged: true
+      }).eq("id", orderId);
+
+      if (error) {
+        throw error;
+      }
+
+      setCollectingPayment(null);
+      toast.success("Transfer confirmed ✓ Order moved to Completed");
+      fetchCounts();
+    } catch (err: any) {
+      console.error("Failed to update order:", err);
+      toast.error("Failed to confirm transfer: " + err.message);
+      // Rollback
+      if (originalOrder) {
+        setOrders((prev) => prev.map((o) => (o.id === orderId ? originalOrder : o)));
+      }
+    }
   };
 
-  const labelFor = (t: Tab) => t === "Active" ? "Active" : t === "history" ? "History" : t.replace("_", " ");
+  const labelFor = (t: Tab) => t === "completed" ? "Completed" : t === "pending_transfer" ? "Pending Transfer" : t.replace("_", " ");
 
   // Fetch EVERY matching served order from the DB (no pagination) for export
   const fetchAllForExport = async () => {
@@ -242,7 +253,7 @@ const Orders = () => {
       .from("orders")
       .select("id, short_code, table_number, intent, status, total, created_at, payment_status, customer_name, order_items(name, qty, price, item_intent)")
       .eq("restaurant_id", restaurant.id)
-      .eq("status", "served")
+      .in("status", ["served", "completed", "refunded"])
       .order("created_at", { ascending: false });
 
     if (exportRange !== "all") {
@@ -344,18 +355,23 @@ const Orders = () => {
           : orders.map((o) => {
           const urgent = o.status === "pending" && (Date.now() - new Date(o.created_at).getTime()) > 2 * 60 * 1000;
           return (
-            <div key={o.id} className={`bg-card border rounded-2xl p-4 shadow-soft transition-smooth ${urgent ? "border-destructive/50 bg-destructive/5" : "border-border"}`}>
-              <div className="flex items-start gap-3">
+            <div key={o.id} className={`bg-card border rounded-2xl shadow-soft transition-smooth ${urgent ? "border-destructive/50 bg-destructive/5" : "border-border hover:border-primary/30"}`}>
+              <Link to={`/dashboard/orders/${o.id}`} className="flex items-start gap-3 p-4">
                 {urgent && <span className="h-2 w-2 rounded-full bg-destructive animate-pulse-soft mt-2" />}
-                <div className="h-12 w-12 rounded-xl bg-primary-soft text-primary grid place-items-center font-display font-bold shrink-0">T{o.table_number}</div>
+                <div className="h-12 w-12 p-1 rounded-xl bg-primary-soft text-primary flex flex-col items-center justify-center font-display font-bold shrink-0 text-center overflow-hidden">
+                  {o.table_number.toLowerCase() === "walk-in" ? (
+                    <span className="text-[10px] leading-tight">Walk In</span>
+                  ) : (
+                    <span>{o.table_number}</span>
+                  )}
+                </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="font-bold text-sm">
                       {o.customer_name ? o.customer_name : `Guest #${o.short_code.slice(-3)}`}
                     </span>
-                    <Link to={`/dashboard/orders/${o.id}`} className="font-medium text-xs text-muted-foreground hover:text-primary">{o.short_code}</Link>
+                    <span className="font-medium text-xs text-muted-foreground">{o.short_code}</span>
                     <StatusPill status={o.status} />
-                    <IntentBadge intent={o.intent} />
                     <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md ${urgent ? "bg-destructive text-destructive-foreground animate-pulse" : "bg-secondary text-muted-foreground"}`}>
                       <RealTimeAgo date={o.created_at} />
                     </span>
@@ -369,17 +385,14 @@ const Orders = () => {
                 <div className="text-right shrink-0">
                   <div className="font-display font-bold">{formatNaira(Number(o.total))}</div>
                 </div>
-              </div>
-              <div className="flex flex-wrap gap-2 mt-3 sm:pl-16">
+              </Link>
+              <div className="flex flex-wrap gap-2 pb-4 px-4 sm:pl-20">
                 {o.status === "pending" && <Button size="sm" variant="hero" onClick={() => advance(o.id, "preparing")}>Start Preparing</Button>}
                 {o.status === "preparing" && <Button size="sm" variant="hero" className="bg-blue-600 hover:bg-blue-700" onClick={() => advance(o.id, "served")}>Mark as Served</Button>}
                 {o.status === "served" && o.payment_status !== "unpaid" && <span className="text-xs text-green-600 font-semibold flex items-center gap-1 px-3"><Check className="h-3 w-3" /> Completed</span>}
                 {o.status === "served" && o.payment_status === "unpaid" && (
-                  <Button size="sm" className="bg-amber-500 hover:bg-amber-600 text-white font-bold h-9" onClick={() => setCollectingPayment(o)}>
-                    ⏳ Collect Payment
-                  </Button>
+                   <span className="text-xs text-amber-500 font-semibold flex items-center gap-1 px-3">⏳ Awaiting Cashier</span>
                 )}
-                <Button size="sm" variant="outline" asChild><Link to={`/dashboard/orders/${o.id}`}><MessageCircle className="h-3.5 w-3.5" />Open Chat</Link></Button>
               </div>
             </div>
           );
@@ -410,55 +423,40 @@ const Orders = () => {
       </Dialog>
 
       <Dialog open={!!collectingPayment} onOpenChange={(o) => !o && setCollectingPayment(null)}>
-        <DialogContent className="max-w-md rounded-[2rem] p-6 sm:p-8 max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-sm rounded-[2rem] p-6 sm:p-8">
           <DialogHeader className="text-center mb-2">
-            <DialogTitle className="font-display text-xl sm:text-2xl font-black uppercase tracking-wider">Collect Payment</DialogTitle>
+            <div className="text-4xl mb-3">🏦</div>
+            <DialogTitle className="font-display text-xl sm:text-2xl font-black uppercase tracking-wider">Confirm Transfer</DialogTitle>
             <DialogDescription className="font-medium text-xs sm:text-sm">
-              Confirm payment to close this order and add to revenue.
+              Confirm you have received the bank transfer for this order.
             </DialogDescription>
           </DialogHeader>
 
           {collectingPayment && (
-            <div className="bg-secondary/50 rounded-2xl p-4 my-2 sm:my-4">
-              <div className="flex justify-between items-center mb-3 pb-3 border-b border-border/50">
+            <div className="bg-secondary/50 rounded-2xl p-4 my-2">
+              <div className="flex justify-between items-center">
                 <div>
-                  <div className="font-bold">{collectingPayment.customer_name || `Table ${collectingPayment.table_number}`}</div>
+                  <div className="font-bold text-sm">{collectingPayment.customer_name || `Walk-in`}</div>
                   <div className="text-xs text-muted-foreground">{collectingPayment.short_code}</div>
                 </div>
-                <div className="text-right">
-                  <div className="font-display font-black text-xl text-primary">{formatNaira(Number(collectingPayment.total))}</div>
-                </div>
+                <div className="font-display font-black text-xl text-primary">{formatNaira(Number(collectingPayment.total))}</div>
               </div>
-              <div className="space-y-1 max-h-[120px] sm:max-h-[150px] overflow-y-auto pr-1 custom-scrollbar">
-                {(collectingPayment.order_items || []).map((i, idx) => (
-                  <div key={idx} className="text-xs flex justify-between">
-                    <span className="text-muted-foreground">{i.qty}× {i.name}</span>
-                  </div>
+              <div className="mt-3 pt-3 border-t border-border/50 space-y-1">
+                {(collectingPayment.order_items || []).map((i: any, idx: number) => (
+                  <div key={idx} className="text-xs text-muted-foreground">{i.qty}× {i.name}</div>
                 ))}
               </div>
             </div>
           )}
 
-          <div className="grid gap-2 sm:gap-3 mt-2">
+          <div className="grid gap-2 mt-2">
             <Button
-              className="h-12 sm:h-14 rounded-2xl text-sm sm:text-base font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-soft"
-              onClick={() => collectingPayment && collectPaymentAndServe(collectingPayment.id, "cash_paid")}
-            >
-              💵 Cash
-            </Button>
-            <Button
-              className="h-12 sm:h-14 rounded-2xl text-sm sm:text-base font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-soft"
-              onClick={() => collectingPayment && collectPaymentAndServe(collectingPayment.id, "pos_paid")}
-            >
-              💳 POS Terminal
-            </Button>
-            <Button
-              className="h-12 sm:h-14 rounded-2xl text-sm sm:text-base font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-soft"
+              className="h-12 rounded-2xl font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-soft"
               onClick={() => collectingPayment && collectPaymentAndServe(collectingPayment.id, "confirmed")}
             >
-              🏦 Bank Transfer
+              ✅ Yes, Transfer Received
             </Button>
-            <Button variant="ghost" className="h-10 sm:h-12 mt-1 rounded-xl text-muted-foreground" onClick={() => setCollectingPayment(null)}>Cancel</Button>
+            <Button variant="ghost" className="h-10 rounded-xl text-muted-foreground" onClick={() => setCollectingPayment(null)}>Cancel</Button>
           </div>
         </DialogContent>
       </Dialog>

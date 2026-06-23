@@ -335,7 +335,7 @@ const Dashboard = () => {
   const todayRequests = requests.filter((r) => new Date(r.created_at) >= startOfToday);
   const stats = isEvent ? [
     { label: "Orders today", value: String(todayOrders.length), icon: ShoppingBag },
-    { label: "Active tables", value: `${activeTablesCount}`, icon: Users },
+    { label: "Active queues", value: `${activeTablesCount}`, icon: Users },
     { label: "Pending orders", value: String(orders.filter((o) => o.status === "pending").length), icon: Clock },
     { label: "Events", value: String(events.length), icon: TrendingUp },
   ] : [
@@ -485,90 +485,6 @@ const Dashboard = () => {
           </div>
         </div>
       )}
-      {!isEvent && (() => {
-        const activeTables = Object.entries(tableStatusMap)
-          .sort((a, b) => {
-            // pending before preparing, then by table number
-            if (a[1] === b[1]) return Number(a[0]) - Number(b[0]);
-            return a[1] === 'pending' ? -1 : 1;
-          });
-        const activeOrders = orders.filter(o => ['pending', 'preparing'].includes(o.status));
-        return (
-          <div className="bg-card border border-border rounded-2xl shadow-soft p-4 sm:p-5 mb-10">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="font-display font-semibold flex items-center gap-2">
-                  <Zap className="h-4 w-4 text-primary" /> Hot Tables
-                </h2>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {activeTables.length === 0 ? 'No active tables right now' : `${activeTables.length} of ${tableCount} tables active`}
-                </p>
-              </div>
-              <Link to="/dashboard/orders" className="text-xs font-semibold text-primary flex items-center gap-1 hover:underline">
-                All orders <ArrowRight className="h-3 w-3" />
-              </Link>
-            </div>
-
-            {activeTables.length === 0 ? (
-              <div className="py-8 text-center">
-                <div className="text-3xl mb-2">✅</div>
-                <p className="text-sm font-semibold text-muted-foreground">All quiet — no pending orders</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {activeTables.map(([tableNum, status]) => {
-                  const isPending = status === 'pending';
-                  const tableOrders = activeOrders.filter(o => o.table_number === tableNum);
-                  const totalItems = tableOrders.reduce((s, o) => s + (o.order_items?.reduce((si, i) => si + i.qty, 0) || 0), 0);
-                  const latestOrder = tableOrders.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
-                  const waitMs = latestOrder ? Date.now() - new Date(latestOrder.created_at).getTime() : 0;
-                  const waitMins = Math.floor(waitMs / 60000);
-                  const isUrgent = isPending && waitMins >= 2;
-
-                  return (
-                    <Link
-                      key={tableNum}
-                      to={latestOrder ? `/dashboard/orders/${latestOrder.id}` : '/dashboard/orders'}
-                      className={`flex items-center justify-between px-4 py-3 rounded-xl border transition-smooth hover:scale-[1.01] ${
-                        isUrgent
-                          ? 'bg-destructive/5 border-destructive/40 animate-pulse-soft'
-                          : isPending
-                          ? 'bg-destructive/5 border-destructive/20'
-                          : 'bg-blue-500/5 border-blue-500/20'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className={`h-10 w-10 rounded-xl font-display font-black text-sm grid place-items-center shrink-0 ${
-                          isPending ? 'bg-destructive/10 text-destructive' : 'bg-blue-500/10 text-blue-600'
-                        }`}>
-                          T{tableNum}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${
-                              isPending ? 'bg-destructive text-white' : 'bg-blue-500 text-white'
-                            }`}>
-                              {isPending ? 'PENDING' : 'PREPARING'}
-                            </span>
-                            {isUrgent && (
-                              <span className="text-[10px] font-black text-destructive animate-pulse">⚠ URGENT</span>
-                            )}
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {totalItems > 0 ? `${totalItems} item${totalItems !== 1 ? 's' : ''}` : 'Order placed'}
-                            {waitMins > 0 ? ` · ${waitMins}m ago` : ' · just now'}
-                          </p>
-                        </div>
-                      </div>
-                      <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
-                    </Link>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        );
-      })()}
 
       {/* Sales chart */}
       {!dataLoaded ? <ChartSkeleton /> : (
@@ -669,7 +585,9 @@ const Dashboard = () => {
                 const urgent = o.status === "pending" && (Date.now() - new Date(o.created_at).getTime()) > 2 * 60 * 1000;
                 return (
                   <Link to={`/dashboard/orders/${o.id}`} key={o.id} className={`flex items-center gap-4 p-4 hover:bg-secondary/50 transition-smooth ${urgent ? "bg-destructive/5" : ""}`}>
-                    <div className="h-10 w-10 rounded-xl bg-primary-soft text-primary grid place-items-center font-display font-bold text-sm shrink-0">T{o.table_number}</div>
+                    <div className="h-10 w-10 rounded-xl bg-primary-soft text-primary grid place-items-center font-display font-bold text-xs sm:text-sm shrink-0">
+                      {o.table_number === "Walk-in" ? "OTC" : o.table_number}
+                    </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-sm truncate">Order {o.short_code}</span>
@@ -690,7 +608,9 @@ const Dashboard = () => {
                 const isUrgent = !r.resolved && (r.type === 'waiter' || r.type === 'help' || r.type === 'complaint');
                 return (
                   <div key={r.id} className={`flex items-center gap-4 p-4 ${isUrgent ? "bg-warning/5" : ""}`}>
-                    <div className="h-10 w-10 rounded-xl bg-warning/10 text-warning grid place-items-center font-display font-bold text-xs shrink-0">T{r.table_number || "—"}</div>
+                    <div className="h-10 w-10 rounded-xl bg-warning/10 text-warning grid place-items-center font-display font-bold text-xs shrink-0">
+                      {r.table_number || "—"}
+                    </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-sm truncate capitalize">{r.type} Request</span>
@@ -713,7 +633,7 @@ const Dashboard = () => {
                         <span className="font-medium text-sm truncate">New Message · {m.orders?.short_code}</span>
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600">CHAT</span>
                       </div>
-                      <p className="text-xs text-muted-foreground truncate mt-0.5">T{m.orders?.table_number}: {m.body}</p>
+                      <p className="text-xs text-muted-foreground truncate mt-0.5">{m.orders?.table_number}: {m.body}</p>
                     </div>
                     <div className="text-right shrink-0 text-xs text-muted-foreground"><RealTimeAgo date={m.created_at} /></div>
                   </Link>
@@ -752,7 +672,7 @@ const SubscriptionCard = () => {
   const status = restaurant.subscription_status ?? "trial";
   const tableCount = restaurant.table_count || 0;
   const currentPlanName = restaurant.subscription_plan || "Dynamic Pricing";
-  const limitLabel = `${tableCount} tables capacity`;
+  const limitLabel = `${tableCount} registers capacity`;
   const trialLeft = trialDaysLeft(restaurant.trial_ends_at);
   const isActive = status === "active";
   const isTrial = status === "trial";
@@ -773,7 +693,7 @@ const SubscriptionCard = () => {
             </span>
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {tableCount} of {limitLabel} · {restaurant.subscription_period === "annual" ? "Yearly" : "Monthly"} billing
+            {restaurant.subscription_period === "annual" ? "Yearly" : "Monthly"} billing
           </p>
         </div>
       </div>
