@@ -36,15 +36,24 @@ const RequireRoleGuard = ({ children, allowed }: { children: ReactNode; allowed:
     );
   }
 
+  // No authenticated user at all → send to login
   if (!user) {
     const safePath = loc.pathname.startsWith("/") ? loc.pathname : "/dashboard";
     return <Navigate to={`/login?redirect=${encodeURIComponent(safePath)}`} replace />;
   }
 
-  // If the user has a role and it's not allowed, redirect them.
-  if (role && !allowed.includes(role)) {
+  // Role is still resolving (null) even after loading flags cleared — keep showing
+  // the page rather than incorrectly redirecting. Role null + user present = context
+  // may still be settling from cache.
+  if (role === null) {
+    return <>{children}</>;
+  }
+
+  // Role is known and not in the allowed list → redirect to dashboard
+  if (!allowed.includes(role)) {
     return <Navigate to="/dashboard" replace />;
   }
 
   return <>{children}</>;
 };
+
