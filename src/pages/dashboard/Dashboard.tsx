@@ -671,7 +671,7 @@ const SubscriptionCard = () => {
   if (!restaurant) return null;
   const status = restaurant.subscription_status ?? "trial";
   const tableCount = restaurant.table_count || 0;
-  const currentPlanName = restaurant.subscription_plan || "Dynamic Pricing";
+  const currentPlanName = restaurant.subscription_plan || "PharmIQ License";
   const limitLabel = `${tableCount} registers capacity`;
   const trialLeft = trialDaysLeft(restaurant.trial_ends_at);
   const isActive = status === "active";

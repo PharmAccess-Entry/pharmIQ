@@ -8,6 +8,8 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Clock, CheckCircle2, TrendingDown, BadgeCheck, ShoppingCart,
   RotateCcw, AlertTriangle, Banknote, CreditCard, ArrowRight, Users
@@ -30,6 +32,13 @@ export default function ShiftManagement() {
   const [settlingShift, setSettlingShift] = useState<any | null>(null);
   const [selectedShiftDetails, setSelectedShiftDetails] = useState<any | null>(null);
   const [settleLoading, setSettleLoading] = useState(false);
+
+  const [forceClosingShift, setForceClosingShift] = useState<any | null>(null);
+  const [actualCash, setActualCash] = useState<string>("");
+  const [actualPos, setActualPos] = useState<string>("");
+  const [actualTransfers, setActualTransfers] = useState<string>("");
+  const [forceCloseNotes, setForceCloseNotes] = useState<string>("");
+  const [forceCloseLoading, setForceCloseLoading] = useState(false);
 
   const fetchShifts = useCallback(async () => {
     if (!rid) return;
@@ -115,6 +124,49 @@ export default function ShiftManagement() {
     }
   };
 
+  const openForceClose = (shift: any) => {
+    const stats = shiftStats[shift.id];
+    const expectedCash = (Number(shift.start_cash) || 0) + (stats?.cashSales || 0) - (stats?.cashRefunds || 0);
+    const expectedPos = stats?.posSales || 0;
+    const expectedTransfers = stats?.transferSales || 0;
+    
+    setForceClosingShift({ ...shift, expectedCash, expectedPos, expectedTransfers });
+    setActualCash(expectedCash.toString());
+    setActualPos(expectedPos.toString());
+    setActualTransfers(expectedTransfers.toString());
+    setForceCloseNotes("Force closed by admin");
+  };
+
+  const handleForceClose = async () => {
+    if (!forceClosingShift) return;
+    setForceCloseLoading(true);
+    try {
+      const { error } = await supabase
+        .from("shifts")
+        .update({
+          status: "completed",
+          end_time: new Date().toISOString(),
+          expected_cash: forceClosingShift.expectedCash,
+          expected_pos: forceClosingShift.expectedPos,
+          expected_transfers: forceClosingShift.expectedTransfers,
+          actual_cash: Number(actualCash) || 0,
+          actual_pos: Number(actualPos) || 0,
+          actual_transfers: Number(actualTransfers) || 0,
+          notes: forceCloseNotes,
+        })
+        .eq("id", forceClosingShift.id);
+      
+      if (error) throw error;
+      toast.success("Shift force closed successfully.");
+      setForceClosingShift(null);
+      fetchShifts();
+    } catch (e: any) {
+      toast.error("Failed to force close shift: " + e.message);
+    } finally {
+      setForceCloseLoading(false);
+    }
+  };
+
   const activeShifts = shifts.filter(s => s.status === "active");
   const completedShifts = shifts.filter(s => s.status === "completed");
   const settledShifts = shifts.filter(s => s.status === "settled");
@@ -172,12 +224,12 @@ export default function ShiftManagement() {
                   <div key={shift.id} className={`bg-card border ${isLongRunning ? 'border-destructive/50 bg-destructive/5' : 'border-primary/20 bg-primary/5'} rounded-2xl p-5 space-y-3`}>
                     <div className="flex justify-between items-start gap-3">
                       <div className="min-w-0">
-                        <p className="font-bold text-base flex items-center gap-2">
+                        <div className="font-bold text-base flex items-center gap-2">
                           <span className="truncate" title={staffName}>{staffName}</span>
                           {isLongRunning && (
                             <Badge variant="destructive" className="text-[10px] uppercase h-5 shrink-0">Long Running</Badge>
                           )}
-                        </p>
+                        </div>
                         <p className="text-xs text-muted-foreground mt-0.5 truncate">
                           Since {format(new Date(shift.start_time), "MMM d, h:mm a")} ({Math.floor(hoursRunning)}h)
                         </p>
@@ -204,6 +256,18 @@ export default function ShiftManagement() {
                             </div>
                           )}
                         </>
+                      )}
+                      {isAdmin && (
+                        <div className="pt-2 mt-2 border-t border-border/50">
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="w-full text-amber-600 border-amber-600/30 hover:bg-amber-600/10"
+                            onClick={() => openForceClose(shift)}
+                          >
+                            <AlertTriangle className="h-3.5 w-3.5 mr-1.5" /> Force Close Shift
+                          </Button>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -500,6 +564,68 @@ export default function ShiftManagement() {
               )}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+      {/* Force Close Shift Dialog */}
+      <Dialog open={!!forceClosingShift} onOpenChange={(open) => !open && setForceClosingShift(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" /> Force Close Shift
+            </DialogTitle>
+            <DialogDescription>
+              Close this shift on behalf of {staffNames[forceClosingShift?.user_id] || "the cashier"}. Please verify the cash drawer and POS slips before submitting.
+            </DialogDescription>
+          </DialogHeader>
+          {forceClosingShift && (
+            <div className="space-y-4 py-2">
+              <div className="bg-secondary/40 rounded-xl p-4 space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Expected Cash:</span>
+                  <span className="font-bold">{formatNaira(forceClosingShift.expectedCash)}</span>
+                </div>
+                {forceClosingShift.expectedPos > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Expected POS:</span>
+                    <span className="font-bold">{formatNaira(forceClosingShift.expectedPos)}</span>
+                  </div>
+                )}
+                {forceClosingShift.expectedTransfers > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Expected Transfers:</span>
+                    <span className="font-bold">{formatNaira(forceClosingShift.expectedTransfers)}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid gap-4">
+                <div className="grid gap-2">
+                  <Label>Actual Cash Counted (₦)</Label>
+                  <Input type="number" value={actualCash} onChange={(e) => setActualCash(e.target.value)} />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="grid gap-2">
+                    <Label>Actual POS (₦)</Label>
+                    <Input type="number" value={actualPos} onChange={(e) => setActualPos(e.target.value)} />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Actual Transfers (₦)</Label>
+                    <Input type="number" value={actualTransfers} onChange={(e) => setActualTransfers(e.target.value)} />
+                  </div>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Notes</Label>
+                  <Input value={forceCloseNotes} onChange={(e) => setForceCloseNotes(e.target.value)} placeholder="Reason for force closing..." />
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setForceClosingShift(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleForceClose} disabled={forceCloseLoading} className="font-bold gap-1.5">
+              {forceCloseLoading ? "Closing..." : "Force Close Shift"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </DashboardLayout>

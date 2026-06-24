@@ -35,7 +35,7 @@ const sidebarNav = [
       { name: "Reconciliation", to: "/dashboard/reconciliation", icon: ListChecks },
       { name: "Expenses", to: "/dashboard/expenses", icon: Receipt },
       { name: "Audit Logs", to: "/dashboard/audit", icon: ListChecks },
-      { name: "Reports & Printing", to: "/dashboard/reports", icon: Printer },
+      { name: "Reports", to: "/dashboard/reports", icon: Printer },
       { name: "Sync Status", to: "/dashboard/sync", icon: RefreshCw },
     ],
   },
@@ -64,20 +64,46 @@ export const DashboardLayout = ({ children }: { children: ReactNode }) => {
   const { permission, requestPermission } = usePushPermission(restaurant?.id);
   const isOffline = useOfflineStatus();
 
+  // If user visits /dashboard directly, expand nothing by default unless active
   useEffect(() => {
-    setOpen(false);
+    if (location.pathname === "/dashboard") {
+      setExpandedNav(null);
+    }
   }, [location.pathname]);
 
-  const STAFF_HIDDEN_PATHS = ["/dashboard/settings", "/dashboard/analytics", "/dashboard/menu", "/dashboard/qr", "/dashboard/events", "/dashboard/notifications", "/dashboard/inventory", "/dashboard/suppliers", "/dashboard/purchases", "/dashboard/expenses", "/dashboard/audit"];
-  const MANAGER_HIDDEN_PATHS = ["/dashboard/settings", "/dashboard/audit"];
-  const filterNav = (nav: any[]) => nav.filter(item => {
-    if (role === 'staff' && STAFF_HIDDEN_PATHS.includes(item.to)) return false;
-    if (role === 'manager' && MANAGER_HIDDEN_PATHS.includes(item.to)) return false;
-    return true;
-  });
+  // Load latest restaurant data periodically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      refresh();
+    }, 60000); // every minute
+    return () => clearInterval(interval);
+  }, [refresh]);
 
-  const filteredBottomNav = filterNav(bottomNav);
+  const STAFF_HIDDEN_PATHS = ["/dashboard/settings", "/dashboard/analytics", "/dashboard/menu", "/dashboard/qr", "/dashboard/events", "/dashboard/notifications", "/dashboard/inventory", "/dashboard/suppliers", "/dashboard/purchases", "/dashboard/expenses", "/dashboard/audit", "/dashboard/reports", "/dashboard/reconciliation"];
+  const MANAGER_HIDDEN_PATHS = ["/dashboard/settings", "/dashboard/audit"];
+  
+  const filterNav = (navItems: any[]) => {
+    return navItems.map(item => {
+      if (item.subItems) {
+        return {
+          ...item,
+          subItems: item.subItems.filter((sub: any) => {
+            if (role === 'staff' && STAFF_HIDDEN_PATHS.includes(sub.to)) return false;
+            if (role === 'manager' && MANAGER_HIDDEN_PATHS.includes(sub.to)) return false;
+            return true;
+          })
+        };
+      }
+      return item;
+    }).filter(item => {
+      if (role === 'staff' && STAFF_HIDDEN_PATHS.includes(item.to)) return false;
+      if (role === 'manager' && MANAGER_HIDDEN_PATHS.includes(item.to)) return false;
+      return true;
+    });
+  };
+
   const filteredSidebarNav = filterNav(sidebarNav);
+  const filteredBottomNav = filterNav(bottomNav);
   
   const name = restaurant?.name || "Your business";
   const status = restaurant?.subscription_status ?? "trial";
@@ -112,9 +138,9 @@ export const DashboardLayout = ({ children }: { children: ReactNode }) => {
                     isActiveParent ? "bg-primary-soft text-primary" : "text-muted-foreground hover:bg-secondary hover:text-foreground"
                   }`}
                 >
-                  <item.icon className="h-4 w-4" />
-                  <span className="flex-1 text-left">{item.label}</span>
-                  <ChevronDown className={`h-4 w-4 transition-transform duration-200 ${isExpanded ? "rotate-180" : "opacity-50"}`} />
+                  <item.icon className="h-4 w-4 shrink-0" />
+                  <span className="flex-1 text-left whitespace-nowrap truncate">{item.label}</span>
+                  <ChevronDown className={`h-4 w-4 shrink-0 transition-transform duration-200 ${isExpanded ? "rotate-180" : "opacity-50"}`} />
                 </button>
                 {isExpanded && (
                   <div className="pl-9 space-y-1 animate-in slide-in-from-top-2">
@@ -131,7 +157,7 @@ export const DashboardLayout = ({ children }: { children: ReactNode }) => {
                         }
                       >
                         {sub.icon && <sub.icon className="h-3.5 w-3.5 shrink-0" />}
-                        {sub.name}
+                        <span className="whitespace-nowrap truncate">{sub.name}</span>
                       </NavLink>
                     ))}
                   </div>

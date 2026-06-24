@@ -93,7 +93,7 @@ export default function Analytics() {
         const toDate = date.to || date.from; // Default to 'from' date if 'to' is missing
         const { data, error } = await supabase
           .from("orders")
-          .select("id, total, status, payment_status, created_at, table_number, order_items(name, qty, price, menu_item_id)")
+          .select("id, total, status, payment_status, created_at, table_number, user_id, order_items(name, qty, price, menu_item_id)")
           .eq("restaurant_id", rid)
           .gte("created_at", startOfDay(date.from).toISOString())
           .lte("created_at", endOfDay(toDate).toISOString());
@@ -173,7 +173,7 @@ export default function Analytics() {
   const successfulOrders = useMemo(() => {
     let filtered = orders;
     if (selectedStaff !== "all") {
-      filtered = orders.filter(o => o.staff_id === selectedStaff);
+      filtered = orders.filter(o => o.user_id === selectedStaff);
     }
     // Treat any completed payment as successful for revenue purposes, EXCEPT if it was refunded or cancelled
     return filtered.filter(o => {
@@ -292,12 +292,12 @@ export default function Analytics() {
     const perf: Record<string, { name: string; orders: number; revenue: number }> = {};
     
     // Group only when viewing 'all' staff or evaluating the selected staff
-    const ordersToEval = selectedStaff === "all" ? orders : orders.filter(o => o.staff_id === selectedStaff);
+    const ordersToEval = selectedStaff === "all" ? orders : orders.filter(o => o.user_id === selectedStaff);
     
     const successfulEval = ordersToEval.filter(o => o.payment_status === "confirmed" || o.payment_status === "cash_pos" || o.payment_status === "cash_paid" || o.payment_status === "pos_paid");
 
     successfulEval.forEach(o => {
-      const staffId = o.staff_id || "unassigned";
+      const staffId = o.user_id || "unassigned";
       let name = "Unassigned / Admin";
       if (staffId !== "unassigned") {
         const staffMember = staffList.find(s => s.user_id === staffId);
