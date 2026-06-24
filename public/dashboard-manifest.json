@@ -1,9 +1,9 @@
 {
-  "name": "SmartTable Dashboard",
-  "short_name": "ST Manager",
-  "description": "SmartTable Business Dashboard",
-  "theme_color": "#ea384c",
-  "background_color": "#ffffff",
+  "name": "PharmIQ Dashboard",
+  "short_name": "PharmIQ",
+  "description": "PharmIQ Pharmacy Management Dashboard",
+  "theme_color": "#22c55e",
+  "background_color": "#1a2744",
   "display": "standalone",
   "start_url": "/dashboard",
   "icons": [
