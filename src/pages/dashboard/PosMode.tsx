@@ -342,11 +342,12 @@ export default function PosMode() {
   }, [menuItems]);
 
   const loadPendingTransfers = useCallback(async () => {
-    if (!restaurant?.id || !navigator.onLine) return;
+    if (!restaurant?.id || !user?.id || !navigator.onLine) return;
     const { data, error } = await supabase
       .from("orders")
       .select("id, short_code, total, customer_name, intent, created_at, order_items(name, qty, item_intent)")
       .eq("restaurant_id", restaurant.id)
+      .eq("user_id", user.id)
       .in("table_number", ["POS", "Walk-in"])
       .eq("status", "served")
       .eq("payment_status", "unpaid")
@@ -379,7 +380,7 @@ export default function PosMode() {
         .order("name");
       if (pats) setPatients(pats);
     }
-  }, [restaurant?.id, isPharmacy]);
+  }, [restaurant?.id, user?.id, isPharmacy]);
 
   useEffect(() => { loadPendingTransfers(); }, [loadPendingTransfers]);
   // Load shift only once posUnlocked is confirmed and user is known
