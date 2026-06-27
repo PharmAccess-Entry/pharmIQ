@@ -15,6 +15,7 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { formatNaira } from "@/lib/format";
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
 import { WifiOff } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type Expense = {
   id: string;
@@ -213,9 +214,15 @@ export default function Expenses() {
               </thead>
               <tbody>
                 {loading ? (
-                  <tr>
-                    <td colSpan={5} className="p-8 text-center text-muted-foreground">Loading expenses...</td>
-                  </tr>
+                  Array.from({ length: 6 }).map((_, i) => (
+                    <tr key={i} className="border-b border-border/50">
+                      <td className="py-3 px-4"><Skeleton className="h-4 w-20 rounded-md" /></td>
+                      <td className="py-3 px-4"><Skeleton className="h-5 w-28 rounded-full" /></td>
+                      <td className="py-3 px-4"><Skeleton className="h-4 w-40 rounded-md" /></td>
+                      <td className="py-3 px-4"><Skeleton className="h-4 w-16 rounded-md" /></td>
+                      <td className="py-3 px-4 text-right"><Skeleton className="h-7 w-16 rounded-lg ml-auto" /></td>
+                    </tr>
+                  ))
                 ) : filtered.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="p-12 text-center text-muted-foreground">

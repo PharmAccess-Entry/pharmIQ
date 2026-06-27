@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowUp, ArrowDown, WifiOff } from "lucide-react";
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type AuditLog = {
   id: string;
@@ -175,10 +176,21 @@ export default function AuditLogs() {
                         </tr>
                       );
                     })
+                  ) : loading ? (
+                    Array.from({ length: 8 }).map((_, i) => (
+                      <tr key={i} className="border-b border-border/50">
+                        <td className="px-6 py-4"><Skeleton className="h-4 w-32 rounded-md" /></td>
+                        <td className="px-6 py-4"><Skeleton className="h-4 w-40 rounded-md" /></td>
+                        <td className="px-6 py-4"><Skeleton className="h-4 w-24 rounded-md" /></td>
+                        <td className="px-6 py-4"><Skeleton className="h-5 w-20 rounded-full" /></td>
+                        <td className="px-6 py-4"><Skeleton className="h-4 w-12 rounded-md" /></td>
+                        <td className="px-6 py-4"><Skeleton className="h-4 w-48 rounded-md" /></td>
+                      </tr>
+                    ))
                   ) : (
                     <tr>
                       <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
-                        {loading ? "Loading ledger..." : "No inventory movements found."}
+                        No inventory movements found.
                       </td>
                     </tr>
                   )}
@@ -229,10 +241,19 @@ export default function AuditLogs() {
                         </td>
                       </tr>
                     ))
+                  ) : loading ? (
+                    Array.from({ length: 8 }).map((_, i) => (
+                      <tr key={i} className="border-b border-border/50">
+                        <td className="px-6 py-4"><Skeleton className="h-4 w-32 rounded-md" /></td>
+                        <td className="px-6 py-4"><Skeleton className="h-4 w-24 rounded-md" /></td>
+                        <td className="px-6 py-4"><Skeleton className="h-5 w-28 rounded-full" /></td>
+                        <td className="px-6 py-4"><Skeleton className="h-6 w-full max-w-[200px] rounded-md" /></td>
+                      </tr>
+                    ))
                   ) : (
                     <tr>
                       <td colSpan={4} className="px-6 py-12 text-center text-muted-foreground">
-                        {loading ? "Loading logs..." : "No audit logs found."}
+                        No audit logs found.
                       </td>
                     </tr>
                   )}

@@ -10,6 +10,7 @@ import { useRestaurant } from "@/lib/restaurant";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
 import { WifiOff } from "lucide-react";
+import { CardGridSkeleton } from "@/components/LoadingState";
 
 type Patient = {
   id: string;
@@ -239,10 +240,7 @@ export default function Patients() {
         ))}
 
         {loading ? (
-          <div className="col-span-full py-12 text-center text-muted-foreground">
-            <div className="animate-spin w-8 h-8 mx-auto mb-3 border-4 border-primary border-t-transparent rounded-full" />
-            <p>Loading patients...</p>
-          </div>
+          <CardGridSkeleton count={6} />
         ) : filteredPatients.length === 0 && (
           <div className="col-span-full py-12 text-center text-muted-foreground">
             <User className="w-12 h-12 mx-auto mb-3 opacity-20" />
