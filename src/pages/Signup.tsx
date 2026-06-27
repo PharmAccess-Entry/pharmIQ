@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { z } from "zod";
 import { sanitizeInput } from "@/lib/sanitize";
+import { detectCountryInfo } from "@/lib/countryDetect";
 
 const schema = z.object({
   restaurantName: z.string().trim().min(2, "Business name is too short").max(80).transform(val => sanitizeInput(val)),
@@ -47,6 +48,27 @@ const Signup = () => {
     setLoading(true);
     const { error } = await signUp(parsed.data.email, parsed.data.password, parsed.data.restaurantName, parsed.data.businessType);
     if (error) { setLoading(false); return toast.error(error); }
+
+    // Background: detect country & save to restaurant (non-blocking)
+    detectCountryInfo().then(async (info) => {
+      if (!info) return;
+      try {
+        // Wait briefly for the DB trigger to create the restaurant row
+        await new Promise(r => setTimeout(r, 2000));
+        const { data: { user: newUser } } = await supabase.auth.getUser();
+        if (!newUser) return;
+        const { data: rest } = await supabase.from("restaurants").select("id").eq("owner_id", newUser.id).maybeSingle();
+        if (!rest?.id) return;
+        await supabase.from("restaurants").update({
+          country: info.country,
+          currency_code: info.currency_code,
+          currency_symbol: info.currency_symbol,
+          timezone: info.timezone,
+          language: info.language,
+        }).eq("id", rest.id);
+      } catch {}
+    });
+
     setLoading(false);
     toast.success("Account created! Check your email to confirm, then log in.");
     nav("/login");

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Helmet } from "react-helmet-async";
+import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useRestaurant } from "@/lib/restaurant";
 import { useAuth } from "@/lib/auth";
-import { formatNaira } from "@/lib/format";
+import { formatNaira, formatCurrency } from "@/lib/format";
 import { toast } from "sonner";
 import { createNotification } from "@/lib/useNotifications";
 import { Button } from "@/components/ui/button";
@@ -289,6 +290,18 @@ export default function PosMode() {
         toast.success("Shift ended successfully!");
       }
 
+      if (restaurant?.telegram_enabled) {
+        const variance = actualCashVal - (shiftExpected?.expected_cash || 0);
+        const emoji = variance < 0 ? "⚠️" : variance > 0 ? "💰" : "✅";
+        const msg = `🧾 <b>Shift Closed</b>\n\n👤 Cashier: ${user?.user_metadata?.full_name || user?.email || 'Unknown'}\n⏱ Duration: ${Math.floor((new Date().getTime() - new Date(activeShift.start_time).getTime()) / (1000 * 60 * 60))} hours\n\n💵 <b>Cash</b>\nExpected: ${formatCurrency(shiftExpected?.expected_cash || 0)}\nActual: ${formatCurrency(actualCashVal)}\nVariance: ${emoji} ${formatCurrency(variance)}\n\n💳 <b>POS</b>\nExpected: ${formatCurrency(shiftExpected?.expected_pos || 0)}\nActual: ${formatCurrency(actualPosVal)}\n\n🏦 <b>Transfers</b>\nExpected: ${formatCurrency(shiftExpected?.expected_transfers || 0)}\nActual: ${formatCurrency(actualTransfersVal)}${shiftNotes ? `\n\n📝 Notes: ${shiftNotes}` : ''}`;
+        
+        if (isOffline) {
+          await queueAction(restaurant.id, "TELEGRAM_NOTIFY", { restaurant_id: restaurant.id, message: msg });
+        } else {
+          supabase.functions.invoke("telegram-notify", { body: { restaurant_id: restaurant.id, message: msg } }).catch(console.error);
+        }
+      }
+
       setActiveShift(null);
       setEndShiftModalOpen(false);
       setShiftExpected(null);
@@ -342,34 +355,60 @@ export default function PosMode() {
   }, [menuItems]);
 
   const loadPendingTransfers = useCallback(async () => {
-    if (!restaurant?.id || !user?.id || !navigator.onLine) return;
-    const { data, error } = await supabase
-      .from("orders")
-      .select("id, short_code, total, customer_name, intent, created_at, order_items(name, qty, item_intent)")
-      .eq("restaurant_id", restaurant.id)
-      .eq("user_id", user.id)
-      .in("table_number", ["POS", "Walk-in"])
-      .eq("status", "served")
-      .eq("payment_status", "unpaid")
-      .order("created_at", { ascending: true });
-
-    if (!error && data) {
-      const mapped: PendingTransfer[] = data.map(o => ({
+    if (!restaurant?.id || !user?.id) return;
+    
+    if (!navigator.onLine) {
+      const { db } = await import('@/lib/offline/db');
+      const offlineTransfers = await db.sales
+        .where('restaurant_id').equals(restaurant.id)
+        .filter(s => s.user_id === user.id && s.status === 'served' && s.payment_status === 'unpaid' && (s.table_number === 'POS' || s.table_number === 'Walk-in'))
+        .toArray();
+      
+      const mapped: PendingTransfer[] = offlineTransfers.map(o => ({
         orderId: o.id,
         shortCode: o.short_code,
         total: o.total,
         customerName: o.customer_name || "Walk-in",
-        items: (o.order_items as any[] || []).map(i => ({
+        items: (o.order_items || []).map(i => ({
           name: i.name,
           qty: i.qty,
           item_intent: i.item_intent
         })) as CartItem[],
         paymentMethod: "bank_transfer",
         cashGiven: 0,
-        orderIntent: o.intent as any,
+        orderIntent: (o.intent as any) || "takeaway",
         placedAt: new Date(o.created_at).getTime()
       }));
-      setPendingTransfers(mapped);
+      setPendingTransfers(mapped.sort((a, b) => a.placedAt - b.placedAt));
+    } else {
+      const { data, error } = await supabase
+        .from("orders")
+        .select("id, short_code, total, customer_name, intent, created_at, order_items(name, qty, item_intent)")
+        .eq("restaurant_id", restaurant.id)
+        .eq("user_id", user.id)
+        .in("table_number", ["POS", "Walk-in"])
+        .eq("status", "served")
+        .eq("payment_status", "unpaid")
+        .order("created_at", { ascending: true });
+
+      if (!error && data) {
+        const mapped: PendingTransfer[] = data.map(o => ({
+          orderId: o.id,
+          shortCode: o.short_code,
+          total: o.total,
+          customerName: o.customer_name || "Walk-in",
+          items: (o.order_items as any[] || []).map(i => ({
+            name: i.name,
+            qty: i.qty,
+            item_intent: i.item_intent
+          })) as CartItem[],
+          paymentMethod: "bank_transfer",
+          cashGiven: 0,
+          orderIntent: o.intent as any,
+          placedAt: new Date(o.created_at).getTime()
+        }));
+        setPendingTransfers(mapped);
+      }
     }
 
     if (isPharmacy) {
@@ -613,28 +652,41 @@ export default function PosMode() {
 
   // Confirm transfer payment for a parked order
   const confirmTransfer = async (pt: PendingTransfer) => {
-    if (!navigator.onLine) {
-      toast.error("Cannot confirm transfers while offline. Please connect to the internet.");
-      return;
-    }
     setConfirmingTransfer(pt);
-    const { error } = await supabase.from("orders").update({ 
+    
+    const updateData = { 
       status: "completed",
       payment_status: "confirmed" 
-    }).eq("id", pt.orderId);
-    
-    if (error) {
-      toast.error("Failed to confirm: " + error.message);
-      setConfirmingTransfer(null);
-      return;
+    };
+
+    if (!navigator.onLine) {
+      if (!restaurant?.id) return;
+      // 1. Queue for sync
+      await queueAction(restaurant.id, 'SALE_UPDATE', {
+        id: pt.orderId,
+        data: updateData
+      });
+      // 2. Update local Dexie cache if the sale exists there
+      const { db } = await import('@/lib/offline/db');
+      await db.sales.update(pt.orderId, updateData);
+      toast.success(`Transfer confirmed offline for ${pt.shortCode} ✓`);
+    } else {
+      const { error } = await supabase.from("orders").update(updateData).eq("id", pt.orderId);
+      if (error) {
+        toast.error("Failed to confirm: " + error.message);
+        setConfirmingTransfer(null);
+        return;
+      }
+      toast.success(`Transfer confirmed for ${pt.shortCode} ✓`);
     }
 
     setPendingTransfers(prev => prev.filter(t => t.orderId !== pt.orderId));
     setSuccessOrder({ id: pt.orderId, shortCode: pt.shortCode, items: pt.items, total: pt.total, paymentMethod: pt.paymentMethod, cashGiven: pt.cashGiven, orderIntent: pt.orderIntent });
     setConfirmingTransfer(null);
-    toast.success(`Transfer confirmed for ${pt.shortCode} ✓`);
     // Re-sync in case other pending transfers exist
-    loadPendingTransfers();
+    if (navigator.onLine) {
+      loadPendingTransfers();
+    }
   };
 
 
@@ -861,8 +913,7 @@ export default function PosMode() {
           <div>
             <h2 className="font-display text-2xl font-bold mb-2">Cashier / POS is a Premium Feature</h2>
             <p className="text-muted-foreground text-sm max-w-sm">
-              The Cashier POS requires an active subscription of
-              <span className="font-bold text-foreground"> &#x20A6;5,000/month</span>.
+              The Cashier POS requires an active subscription.
               Upgrade your plan to unlock walk-in order management, mixed orders, bank transfer tracking, and printed receipts.
             </p>
           </div>
@@ -874,11 +925,11 @@ export default function PosMode() {
               </div>
             ))}
           </div>
-          <a href="/dashboard/settings#plan">
+          <Link to="/dashboard/settings#plan">
             <Button size="lg" className="gap-2 font-bold">
               <Banknote className="h-5 w-5" /> Upgrade to Unlock POS
             </Button>
-          </a>
+          </Link>
           {subStatus === "trial" && (
             <p className="text-xs text-muted-foreground">You are currently on a free trial. Upgrade your plan to access this feature.</p>
           )}
@@ -894,7 +945,7 @@ export default function PosMode() {
           <span className="text-lg">🚫</span>
           <div>
             <div className="font-bold">Orders Are Currently Paused</div>
-            <div className="text-xs font-normal text-destructive/80 mt-0.5">The {isPharmacy ? 'pharmacy' : 'restaurant'} is not accepting orders. Re-enable in <a href="/dashboard/settings" className="underline font-bold">Settings → Accepting Orders</a>.</div>
+            <div className="text-xs font-normal text-destructive/80 mt-0.5">The {isPharmacy ? 'pharmacy' : 'restaurant'} is not accepting orders. Re-enable in <Link to="/dashboard/settings" className="underline font-bold">Settings → Accepting Orders</Link>.</div>
           </div>
         </div>
       )}

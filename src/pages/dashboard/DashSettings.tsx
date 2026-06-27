@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRestaurant, initialsFromName, trialDaysLeft } from "@/lib/restaurant";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Loader2, Upload, Lock, Users, Trash2, Plus, X, Copy, Link2, Share2, MessageCircle, CreditCard, Building2, WifiOff } from "lucide-react";
+import { Loader2, Upload, Lock, Users, Trash2, Plus, X, Copy, Link2, Share2, MessageCircle, CreditCard, Building2, WifiOff, Globe, Send, CheckCircle2, XCircle, FlaskConical } from "lucide-react";
 import { Link } from "react-router-dom";
 import { formatNaira } from "@/lib/format";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -19,10 +19,19 @@ import { usePushPermission } from "@/lib/usePushPermission";
 import imageCompression from "browser-image-compression";
 import { useAuth } from "@/lib/auth";
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
+import { SUPPORTED_COUNTRIES, symbolForCode } from "@/lib/countryDetect";
 
-// Pharmacy flat pricing
-const MONTHLY_PRICE = 5000;
-const ANNUAL_PRICE = MONTHLY_PRICE * 10; // 2 months free
+// Pharmacy plan definitions (user limits)
+const PHARMACY_PLANS: Record<string, { users: number | null; label: string }> = {
+  Starter:  { users: 4,    label: "Starter" },
+  Growth:   { users: 11,   label: "Growth" },
+  Business: { users: null, label: "Business" },
+};
+
+function getPlanLimit(plan: string | null | undefined): number | null {
+  if (!plan) return 4; // trial defaults to Starter limits
+  return PHARMACY_PLANS[plan]?.users ?? 4;
+}
 
 const DashSettings = () => {
   const { theme, toggle } = useTheme();
@@ -45,6 +54,24 @@ const DashSettings = () => {
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [removeStaffTarget, setRemoveStaffTarget] = useState<{ id: string; name: string } | null>(null);
 
+  // Telegram state (SaaS Architecture)
+  const [telegramEnabled, setTelegramEnabled] = useState(false);
+  const [connectingTg, setConnectingTg] = useState(false);
+  const [testingTg, setTestingTg] = useState(false);
+  const [tgConnected, setTgConnected] = useState(false);
+  const [tgUsername, setTgUsername] = useState<string | null>(null);
+  const [tgConnectedAt, setTgConnectedAt] = useState<string | null>(null);
+  const [tgLastNotified, setTgLastNotified] = useState<string | null>(null);
+  const [tgPollStatus, setTgPollStatus] = useState<"idle" | "waiting" | "found">("idle");
+  const [tgPrefs, setTgPrefs] = useState<Record<string, boolean>>({});
+  const [tgReportTime, setTgReportTime] = useState<string>("22:00:00");
+  const [showPrefs, setShowPrefs] = useState(false);
+  const [disconnectConfirmOpen, setDisconnectConfirmOpen] = useState(false);
+
+  // Business locale state
+  const [localeForm, setLocaleForm] = useState({ country: "", currency_code: "", currency_symbol: "", timezone: "", language: "" });
+  const [savingLocale, setSavingLocale] = useState(false);
+
   const [form, setForm] = useState({
     name: "",
     phone: "",
@@ -66,7 +93,160 @@ const DashSettings = () => {
       bank_account_name: restaurant.bank_account_name || "",
       logo_url: restaurant.logo_url || "",
     });
+    setLocaleForm({
+      country: restaurant.country || "",
+      currency_code: restaurant.currency_code || "",
+      currency_symbol: restaurant.currency_symbol || "",
+      timezone: restaurant.timezone || "",
+      language: restaurant.language || "",
+    });
+    setTelegramEnabled(restaurant.telegram_enabled || false);
+    setTgConnected(!!restaurant.telegram_chat_id);
+    setTgUsername(restaurant.telegram_username || null);
+    setTgConnectedAt(restaurant.telegram_connected_at || null);
+    setTgLastNotified(restaurant.telegram_last_notified_at || null);
+    setTgPrefs(restaurant.telegram_notify_prefs || {
+      daily_report: true, weekly_report: true, monthly_report: true,
+      end_shift: true, low_stock: true, out_of_stock: true,
+      reconciliation: true, subscription: true, sync_status: true
+    });
+    setTgReportTime(restaurant.telegram_report_time || "22:00:00");
   }, [restaurant]);
+
+  const setLocale = (k: keyof typeof localeForm, v: string) => setLocaleForm(p => ({ ...p, [k]: v }));
+
+  const saveLocale = async () => {
+    if (!restaurant?.id) return;
+    setSavingLocale(true);
+    const { error } = await supabase.from("restaurants").update({
+      country: localeForm.country,
+      currency_code: localeForm.currency_code,
+      currency_symbol: localeForm.currency_symbol,
+      timezone: localeForm.timezone,
+      language: localeForm.language,
+    }).eq("id", restaurant.id);
+    setSavingLocale(false);
+    if (error) return toast.error(error.message);
+    await refresh();
+    toast.success("Business details updated");
+  };
+
+  const connectTelegram = async () => {
+    setConnectingTg(true);
+    setTgPollStatus("idle");
+    try {
+      const { data: session } = await supabase.auth.getSession();
+      if (!session.session) throw new Error("Authentication required");
+
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/telegram-connect`, {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.session.access_token}`
+          },
+          body: JSON.stringify({ restaurant_id: restaurant?.id })
+      });
+
+      const data = await response.json();
+      
+      if (!response.ok || !data?.ok) throw new Error(data?.error || "Failed to generate connection link");
+      
+      // Open telegram deep link in new tab
+      window.open(data.deep_link, "_blank");
+      toast.success("Waiting for you to click Start in Telegram...");
+      setTgPollStatus("waiting");
+      
+      // Poll for completion (3 minutes max)
+      let attempts = 0;
+      const poll = setInterval(async () => {
+        attempts++;
+        if (attempts > 90) { // 90 * 2s = 3 mins
+          clearInterval(poll);
+          setTgPollStatus("idle");
+          toast.error("Timed out waiting for Telegram connection. Try again.");
+          return;
+        }
+        const { data: checkData } = await supabase.from("restaurants")
+          .select("telegram_chat_id")
+          .eq("id", restaurant?.id)
+          .maybeSingle();
+        
+        if (checkData?.telegram_chat_id) {
+          clearInterval(poll);
+          setTgPollStatus("found");
+          await refresh();
+          toast.success("Telegram connected successfully!");
+        }
+      }, 2000);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to start connection.");
+    } finally {
+      setConnectingTg(false);
+    }
+  };
+
+  const disconnectTelegram = async () => {
+    if (!restaurant?.id) return;
+    const { error } = await supabase.from("restaurants").update({
+      telegram_chat_id: null,
+      telegram_username: null,
+      telegram_connected_at: null,
+      telegram_last_notified_at: null,
+      telegram_enabled: false
+    }).eq("id", restaurant.id);
+    if (error) return toast.error(error.message);
+    setTgConnected(false);
+    setTgUsername(null);
+    setTgConnectedAt(null);
+    setTgLastNotified(null);
+    setTelegramEnabled(false);
+    setDisconnectConfirmOpen(false);
+    await refresh();
+    toast.success("Telegram disconnected");
+  };
+
+  const toggleTgPref = async (key: string, checked: boolean) => {
+    if (!restaurant?.id) return;
+    const newPrefs = { ...tgPrefs, [key]: checked };
+    setTgPrefs(newPrefs);
+    const { error } = await supabase.from("restaurants").update({ telegram_notify_prefs: newPrefs }).eq("id", restaurant.id);
+    if (error) toast.error("Failed to update preferences");
+    else await refresh();
+  };
+
+  const toggleTelegramEnabled = async (checked: boolean) => {
+    if (!restaurant?.id) return;
+    setTelegramEnabled(checked);
+    const { error } = await supabase.from("restaurants").update({ telegram_enabled: checked }).eq("id", restaurant.id);
+    if (error) toast.error("Failed to update status");
+    else await refresh();
+  };
+
+  const updateTgReportTime = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    if (!restaurant?.id || !val) return;
+    setTgReportTime(val + ":00"); // Ensure HH:mm:ss format for PG time
+    
+    // Auto-detect browser timezone
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const { error } = await supabase.from("restaurants").update({ 
+      telegram_report_time: val + ":00",
+      telegram_report_timezone: tz 
+    }).eq("id", restaurant.id);
+    
+    if (error) toast.error("Failed to save report time");
+    else toast.success("Automated report time saved");
+  };
+
+  const testTelegram = async () => {
+    setTestingTg(true);
+    const { error } = await supabase.functions.invoke("telegram-notify", {
+      body: { restaurant_id: restaurant?.id, message: "👋 Test notification from PharmIQ!\n\nYour integration is working perfectly." }
+    });
+    setTestingTg(false);
+    if (error) toast.error("Failed to send test notification");
+    else toast.success("Test notification sent!");
+  };
 
   const set = (k: keyof typeof form, v: any) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -117,6 +297,21 @@ const DashSettings = () => {
     if (newStaffEmail.trim().toLowerCase() === user?.email?.toLowerCase()) {
       return toast.error("You cannot invite yourself as staff.");
     }
+
+    // Enforce user limit based on current subscription plan
+    const planLimit = getPlanLimit(restaurant?.subscription_plan);
+    if (planLimit !== null) {
+      // Total users = owner (1) + current staff
+      const totalUsers = 1 + staff.length;
+      if (totalUsers >= planLimit) {
+        toast.error(
+          `You have reached the maximum number of users for your current plan (${restaurant?.subscription_plan || "Starter"}: ${planLimit} users). Upgrade your plan to add more users.`,
+          { duration: 6000 }
+        );
+        return;
+      }
+    }
+
     setAddingStaff(true);
 
     const { data: existingInvite } = await supabase
@@ -304,57 +499,130 @@ const DashSettings = () => {
           </div>
         </div>
 
+        {/* ── Business Locale & Currency ── */}
+        <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 shadow-soft">
+          <div className="flex items-center gap-2 mb-1">
+            <Globe className="h-5 w-5 text-primary" />
+            <h2 className="font-display font-semibold text-lg">Business details</h2>
+          </div>
+          <p className="text-sm text-muted-foreground mb-4">
+            Manage your country, currency, and locale settings.
+          </p>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <Label>Country</Label>
+              <Select value={localeForm.country} onValueChange={(v) => {
+                const c = SUPPORTED_COUNTRIES.find(x => x.name === v);
+                if (c) {
+                  setLocale("country", c.name);
+                  setLocale("currency_code", c.currency_code);
+                  setLocale("currency_symbol", symbolForCode(c.currency_code));
+                } else {
+                  setLocale("country", v);
+                }
+              }} disabled={isOffline}>
+                <SelectTrigger className="mt-1.5"><SelectValue placeholder="Select country" /></SelectTrigger>
+                <SelectContent>
+                  {SUPPORTED_COUNTRIES.map(c => <SelectItem key={c.name} value={c.name}>{c.name}</SelectItem>)}
+                  <SelectItem value="Other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Currency Symbol</Label>
+              <Input value={localeForm.currency_symbol} onChange={(e) => setLocale("currency_symbol", e.target.value)} className="mt-1.5" placeholder="e.g. ₦, $, £" disabled={isOffline} />
+            </div>
+          </div>
+          <div className="mt-4 flex justify-end">
+            <Button variant="secondary" onClick={saveLocale} disabled={savingLocale || isOffline} size="sm">
+              {savingLocale ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              Save details
+            </Button>
+          </div>
+        </div>
+
+
         {/* ── Subscription ── */}
         <div id="plan" className="bg-card border border-border rounded-2xl p-4 sm:p-6 shadow-soft scroll-mt-20">
-          <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
-            <div>
+          <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              <CreditCard className="h-5 w-5 text-primary" />
               <h2 className="font-display font-semibold text-lg">Subscription</h2>
-              <div className="flex items-center gap-2 mt-1">
-                <Badge variant={statusVariant}>{statusLabel}</Badge>
+            </div>
+            <Badge variant={statusVariant}>{statusLabel}</Badge>
+          </div>
+
+          {/* Compact plan info */}
+          <div className="bg-secondary/30 rounded-xl border border-border p-4 space-y-3">
+            {/* Plan + billing row */}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="font-semibold text-sm">{restaurant?.subscription_plan || "Free Trial"}</div>
+                <div className="text-xs text-muted-foreground capitalize">
+                  {restaurant?.subscription_period ? `${restaurant.subscription_period === "annual" ? "Yearly" : "Monthly"} billing` : "Trial period"}
+                </div>
+              </div>
+              {restaurant?.subscription_expires_at && (
+                <div className="text-right">
+                  <div className="text-[10px] text-muted-foreground uppercase tracking-wider">Renews</div>
+                  <div className="text-xs font-semibold">
+                    {new Date(restaurant.subscription_expires_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* User count row */}
+            <div className="flex items-center justify-between border-t border-border/50 pt-3">
+              <div className="flex items-center gap-1.5 text-sm">
+                <Users className="h-4 w-4 text-muted-foreground" />
+                <span className="text-muted-foreground">Users</span>
+              </div>
+              <div className="text-sm font-semibold">
+                {1 + staff.length}
+                {getPlanLimit(restaurant?.subscription_plan) !== null && (
+                  <span className="text-muted-foreground font-normal"> / {getPlanLimit(restaurant?.subscription_plan)}</span>
+                )}
+                {getPlanLimit(restaurant?.subscription_plan) === null && (
+                  <span className="text-muted-foreground font-normal"> / Unlimited</span>
+                )}
               </div>
             </div>
+
+            {/* User limit progress (when not unlimited) */}
+            {getPlanLimit(restaurant?.subscription_plan) !== null && (() => {
+              const limit = getPlanLimit(restaurant?.subscription_plan)!;
+              const current = 1 + staff.length;
+              const pct = Math.min(100, Math.round((current / limit) * 100));
+              return (
+                <div>
+                  <div className="h-1.5 w-full bg-border rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        pct >= 100 ? "bg-destructive" : pct >= 80 ? "bg-amber-500" : "bg-primary"
+                      }`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
-          <p className="text-sm text-muted-foreground mb-5">
-            PharmIQ uses a simple flat-rate plan — one price, all features unlocked.
-          </p>
-
-          {/* Pricing cards */}
-          <div className="grid sm:grid-cols-2 gap-4 mb-6">
-            <div className="rounded-2xl border border-border p-5 space-y-1">
-              <div className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Monthly</div>
-              <div className="font-display text-3xl font-bold">{formatNaira(MONTHLY_PRICE)}</div>
-              <div className="text-xs text-muted-foreground">Billed every 30 days</div>
-              <ul className="text-xs text-muted-foreground space-y-1 pt-2">
-                <li>✓ Unlimited products & categories</li>
-                <li>✓ POS, inventory & shift management</li>
-                <li>✓ Staff accounts & roles</li>
-                <li>✓ Analytics & daily reports</li>
-              </ul>
-            </div>
-            <div className="rounded-2xl border border-primary/40 bg-primary/5 p-5 space-y-1 relative overflow-hidden">
-              <div className="absolute top-3 right-3 text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary text-primary-foreground">BEST VALUE</div>
-              <div className="text-xs text-primary font-medium uppercase tracking-wider">Annual</div>
-              <div className="font-display text-3xl font-bold text-primary">{formatNaira(ANNUAL_PRICE)}</div>
-              <div className="text-xs text-primary/70">Billed once — saves 2 months free</div>
-              <ul className="text-xs text-muted-foreground space-y-1 pt-2">
-                <li>✓ Everything in Monthly</li>
-                <li>✓ Priority support</li>
-                <li>✓ Early access to new features</li>
-                <li>✓ 2 months completely free</li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button asChild variant="hero">
-              <Link to="/payment?kind=pharmacy&period=monthly">
-                {status === "active" && !isExpired ? "Renew / Extend" : "Subscribe Monthly"}
+          {/* Action buttons */}
+          <div className="flex flex-wrap gap-2 mt-4">
+            <Button asChild variant="hero" size="sm">
+              <Link to={`/pharmacy/pricing`}>
+                {status === "active" && !isExpired ? "Manage / Upgrade" : "Subscribe Now"}
               </Link>
             </Button>
-            <Button asChild variant="outline" className="border-primary/20 hover:bg-primary/5 text-primary">
-              <Link to="/payment?kind=pharmacy&period=annual">Pay Yearly — Save 2 Months</Link>
-            </Button>
+            {status === "active" && !isExpired && (
+              <Button asChild variant="outline" size="sm">
+                <Link to={`/payment?kind=pharmacy&plan=${restaurant?.subscription_plan || "Starter"}&period=${restaurant?.subscription_period === "annual" ? "annual" : "monthly"}`}>
+                  Renew
+                </Link>
+              </Button>
+            )}
           </div>
         </div>
 
@@ -452,6 +720,139 @@ const DashSettings = () => {
               <Switch defaultChecked={false} disabled={true} />
             </div>
           </div>
+        </div>
+
+        {/* ── Telegram Notifications ── */}
+        <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 shadow-soft">
+          <div className="flex items-center gap-2 mb-1">
+            <Send className="h-5 w-5 text-[#229ED9]" />
+            <h2 className="font-display font-semibold text-lg">Telegram notifications</h2>
+          </div>
+          <p className="text-sm text-muted-foreground mb-4">
+            Connect a Telegram Bot to receive automated shift summaries, low stock alerts, and daily sales reports.
+          </p>
+          
+          {!tgConnected ? (
+            <div className="space-y-4">
+              <div className="bg-secondary/40 p-4 rounded-xl border border-border text-sm space-y-2">
+                <p className="font-medium">Stay in the loop</p>
+                <p className="text-muted-foreground">
+                  Connect PharmIQ to Telegram to automatically receive end-of-shift reports, low stock alerts, and daily sales summaries directly to your phone.
+                </p>
+              </div>
+              <Button onClick={connectTelegram} disabled={connectingTg || isOffline} className="w-full sm:w-auto bg-[#229ED9] hover:bg-[#1c84b6] text-white gap-2">
+                {connectingTg ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                Connect Telegram
+              </Button>
+              
+              {tgPollStatus === "waiting" && (
+                <div className="flex items-center gap-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg text-blue-600 text-sm animate-pulse">
+                  <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                  <span>Waiting for you to click <strong>Start</strong> in Telegram...</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-secondary/30 rounded-xl border border-border gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-[#229ED9]/10 grid place-items-center shrink-0">
+                    <Send className="h-5 w-5 text-[#229ED9]" />
+                  </div>
+                  <div>
+                    <div className="font-medium text-sm flex items-center gap-1.5">
+                      {tgUsername || "Telegram Account"}
+                      <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {tgConnectedAt ? `Connected ${new Date(tgConnectedAt).toLocaleDateString()}` : "Connected"}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {tgLastNotified ? `Last alert: ${new Date(tgLastNotified).toLocaleString()}` : "No alerts sent yet"}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                   <Button variant="outline" size="sm" onClick={() => setShowPrefs(!showPrefs)} disabled={isOffline}>
+                      Preferences
+                   </Button>
+                   <Button variant="outline" size="sm" onClick={testTelegram} disabled={testingTg || isOffline}>
+                    {testingTg ? <Loader2 className="h-4 w-4 animate-spin" /> : <FlaskConical className="h-4 w-4" />}
+                   </Button>
+                   <Button variant="ghost" size="sm" onClick={() => setDisconnectConfirmOpen(true)} disabled={isOffline} className="text-destructive hover:bg-destructive/10 hover:text-destructive">
+                    Disconnect
+                  </Button>
+                </div>
+              </div>
+
+              {showPrefs && (
+                <div className="bg-secondary/20 rounded-xl border border-border p-4 space-y-4 mt-2 animate-in slide-in-from-top-2">
+                   <h3 className="text-sm font-semibold mb-2">Notification Preferences</h3>
+                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                     {[
+                       { key: 'daily_report', label: 'Daily Reports', desc: 'Summary of daily sales and activities' },
+                       { key: 'weekly_report', label: 'Weekly Reports', desc: 'Summary of weekly performance' },
+                       { key: 'monthly_report', label: 'Monthly Reports', desc: 'Detailed monthly analysis' },
+                       { key: 'end_shift', label: 'End of Shift', desc: 'Shift summary when a register is closed' },
+                       { key: 'low_stock', label: 'Low Stock Alerts', desc: 'When items fall below reorder level' },
+                       { key: 'out_of_stock', label: 'Out of Stock', desc: 'When items reach zero inventory' },
+                       { key: 'reconciliation', label: 'Reconciliation', desc: 'Inventory audit variance alerts' },
+                       { key: 'sync_status', label: 'Sync Issues', desc: 'Offline sync failure notifications' }
+                     ].map(pref => (
+                       <div key={pref.key} className="flex items-start justify-between gap-3">
+                         <div className="min-w-0">
+                            <div className="font-medium text-sm">{pref.label}</div>
+                            <div className="text-[10px] text-muted-foreground">{pref.desc}</div>
+                         </div>
+                         <Switch checked={tgPrefs[pref.key] ?? true} onCheckedChange={(c) => toggleTgPref(pref.key, c)} disabled={isOffline} />
+                       </div>
+                     ))}
+                   </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-4 py-3 border-t border-border/50">
+                <div className="min-w-0">
+                  <div className="font-medium text-sm">Automated Report Time</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">When should daily/weekly summaries be sent? (Browser timezone will be used)</div>
+                </div>
+                <div className="w-32 shrink-0">
+                  <Select 
+                    value={tgReportTime.substring(0, 2)} 
+                    onValueChange={(val) => {
+                      const pseudoEvent = { target: { value: `${val}:00` } } as any;
+                      updateTgReportTime(pseudoEvent);
+                    }}
+                    disabled={isOffline || !telegramEnabled}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select time" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-60">
+                      {Array.from({ length: 24 }).map((_, i) => {
+                        const hr = i.toString().padStart(2, '0');
+                        const ampm = i < 12 ? 'AM' : 'PM';
+                        const displayHr = i === 0 ? 12 : i > 12 ? i - 12 : i;
+                        return (
+                          <SelectItem key={hr} value={hr}>
+                            {displayHr}:00 {ampm}
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-4 py-2 border-t border-border/50 pt-4">
+                <div className="min-w-0">
+                  <div className="font-medium text-sm">Master Toggle</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">Enable or disable all Telegram alerts temporarily.</div>
+                </div>
+                <Switch checked={telegramEnabled} onCheckedChange={toggleTelegramEnabled} disabled={isOffline} />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* ── Staff Management ── */}
@@ -568,6 +969,19 @@ const DashSettings = () => {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={() => { refresh(); setResetOpen(false); }}>Discard changes</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={disconnectConfirmOpen} onOpenChange={setDisconnectConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Disconnect Telegram?</AlertDialogTitle>
+            <AlertDialogDescription>Are you sure you want to disconnect? You will no longer receive automated reports or alerts until you connect again.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={disconnectTelegram} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Disconnect</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

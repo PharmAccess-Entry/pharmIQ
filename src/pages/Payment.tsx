@@ -10,6 +10,13 @@ import { formatNaira } from "@/lib/format";
 import { Logo } from "@/components/Logo";
 import { BrandedLoader } from "@/components/LoadingState";
 
+// Pharmacy pricing tiers
+const PHARMACY_PLANS: Record<string, { monthly: number; annual: number; users: string }> = {
+  Starter:  { monthly: 5000,  annual: 50000,  users: "Up to 4 Users" },
+  Growth:   { monthly: 10000, annual: 100000, users: "Up to 11 Users" },
+  Business: { monthly: 25000, annual: 250000, users: "Unlimited Users" },
+};
+
 const Payment = () => {
   const [params] = useSearchParams();
   const nav = useNavigate();
@@ -20,7 +27,8 @@ const Payment = () => {
   const tableCount = parseInt(params.get("tables") || "10", 10);
   const period = (params.get("period") || "monthly") as "monthly" | "annual";
   const eventId = params.get("eventId");
-  const reference = params.get("reference") || params.get("trxref"); // returned from Paystack callback
+  const planParam = params.get("plan") || "Starter"; // Starter | Growth | Business
+  const reference = params.get("reference") || params.get("trxref");
 
   const [loading, setLoading] = useState(false);
   const [verifying, setVerifying] = useState(false);
@@ -48,20 +56,6 @@ const Payment = () => {
         if (j.ok) {
           toast.success("Payment successful 🎉");
           await refresh();
-          // Best-effort receipt email
-          try {
-            await supabase.functions.invoke("send-email", {
-              body: {
-                template: "payment_receipt",
-                to: user?.email,
-                data: {
-                  description: j.kind === "event" ? `Event activation` : `Subscription`,
-                  amount: formatNaira(amount),
-                  reference,
-                },
-              },
-            });
-          } catch { /* noop */ }
           nav("/dashboard");
         } else {
           toast.error("Payment was not completed");
@@ -77,22 +71,22 @@ const Payment = () => {
     ? EVENT_TIERS.find((t) => t.id === eventData.tier) || EVENT_TIERS[0]
     : null;
 
-  const PHARMACY_MONTHLY = 5000;
-  
+  // Derive amount
+  const pharmacyPlan = PHARMACY_PLANS[planParam] || PHARMACY_PLANS.Starter;
   const amount = kind === "restaurant"
     ? (period === "annual" ? monthlyPriceForTables(tableCount) * 10 : monthlyPriceForTables(tableCount))
     : kind === "pharmacy"
-    ? (period === "annual" ? PHARMACY_MONTHLY * 10 : PHARMACY_MONTHLY)
+    ? (period === "annual" ? pharmacyPlan.annual : pharmacyPlan.monthly)
     : eventData ? Number(eventData.amount) : 0;
 
-  const labelName = kind === "restaurant" 
-    ? `${tableCount} Table${tableCount === 1 ? "" : "s"} Capacity` 
+  const labelName = kind === "restaurant"
+    ? `${tableCount} Table${tableCount === 1 ? "" : "s"} Capacity`
     : kind === "pharmacy"
-    ? "PharmIQ Subscription"
+    ? `PharmIQ ${planParam} Plan`
     : eventData ? `Event: ${eventData.name}` : "—";
-    
-  const labelPeriod = (kind === "restaurant" || kind === "pharmacy") 
-    ? (period === "annual" ? "Yearly" : "Monthly") 
+
+  const labelPeriod = (kind === "restaurant" || kind === "pharmacy")
+    ? (period === "annual" ? "Yearly" : "Monthly")
     : "One-time (per event)";
 
   const pay = async () => {
@@ -101,13 +95,13 @@ const Payment = () => {
     try {
       const callbackUrl = `${window.location.origin}/payment`;
       const restaurantId = restaurant?.id;
-      const { data, error } = await supabase.functions.invoke("paystack-init", {
-        body: kind === "restaurant"
-          ? { kind: "restaurant", tables: tableCount, period, callbackUrl, restaurantId }
-          : kind === "pharmacy"
-          ? { kind: "restaurant", tables: 2.5, period, callbackUrl, restaurantId }
-          : { kind: "event", eventId, callbackUrl, restaurantId },
-      });
+      const body = kind === "pharmacy"
+        ? { kind: "pharmacy", plan: planParam, period, callbackUrl, restaurantId }
+        : kind === "restaurant"
+        ? { kind: "restaurant", tables: tableCount, period, callbackUrl, restaurantId }
+        : { kind: "event", eventId, callbackUrl, restaurantId };
+
+      const { data, error } = await supabase.functions.invoke("paystack-init", { body });
       if (error) throw error;
       if (!data?.authorization_url) throw new Error("No checkout URL returned");
       window.location.href = data.authorization_url;
@@ -115,15 +109,8 @@ const Payment = () => {
       setLoading(false);
       let msg = e.message || "Could not start payment";
       try {
-        if (e.context && typeof e.context.json === 'function') {
-          const body = await e.context.clone().json();
-          if (body?.error) msg = body.error;
-        } else if (e.context && e.context.error) {
-          msg = e.context.error;
-        } else if (e.name === 'FunctionsHttpError' && e.message) {
-          // Keep generic message if parsing fails
-        }
-      } catch (err) { /* ignore parse errors */ }
+        if (e.context?.error) msg = e.context.error;
+      } catch { /* ignore */ }
       toast.error(msg);
     }
   };
@@ -149,7 +136,17 @@ const Payment = () => {
   const features = kind === "restaurant"
     ? ["Custom QR menu", "Order & Kitchen management", "Staff accounts", "Detailed analytics", "Priority support"]
     : kind === "pharmacy"
-    ? ["Unlimited products & categories", "POS, inventory & shift management", "Staff accounts & roles", "Analytics & daily reports", "Priority support"]
+    ? [
+        "Dashboard, Products & Inventory",
+        "POS & Barcode Scanning",
+        "Shift Management & Reconciliation",
+        "Analytics, Reports & Audit Logs",
+        "Patients, Suppliers & Purchases",
+        `${pharmacyPlan.users}`,
+        "Telegram Notifications",
+        "Offline Mode & Sync",
+        "Priority Support",
+      ]
     : eventTier
       ? ["QR codes per table", "Live request feed", "Pay only for this event"]
       : [];
@@ -167,6 +164,9 @@ const Payment = () => {
             <div className="rounded-xl bg-primary-soft/50 p-4 mb-4">
               <div className="font-display font-bold text-lg">{labelName}</div>
               <div className="text-sm text-muted-foreground mt-1">{labelPeriod}</div>
+              {kind === "pharmacy" && (
+                <div className="text-xs text-primary mt-1 font-medium">{pharmacyPlan.users}</div>
+              )}
             </div>
             <ul className="space-y-2.5">
               {features.map((f) => (
@@ -181,7 +181,7 @@ const Payment = () => {
             <h3 className="font-display font-semibold mb-4">Order summary</h3>
             <div className="space-y-3 text-sm">
               <div className="flex justify-between gap-2"><span className="text-muted-foreground">Account</span><span className="font-medium truncate min-w-0">{user?.email || restaurant?.name || "—"}</span></div>
-              <div className="flex justify-between gap-2"><span className="text-muted-foreground">Item</span><span className="font-medium truncate min-w-0">{labelName}</span></div>
+              <div className="flex justify-between gap-2"><span className="text-muted-foreground">Plan</span><span className="font-medium truncate min-w-0">{labelName}</span></div>
               <div className="flex justify-between gap-2"><span className="text-muted-foreground">Billing</span><span className="font-medium">{labelPeriod}</span></div>
               <div className="border-t border-border pt-3 flex justify-between items-baseline gap-2">
                 <span className="font-semibold">Total</span>
@@ -197,7 +197,6 @@ const Payment = () => {
           </div>
         </div>
       </main>
-      
     </div>
   );
 };

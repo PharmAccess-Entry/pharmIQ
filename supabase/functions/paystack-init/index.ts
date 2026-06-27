@@ -32,9 +32,11 @@ Deno.serve(async (req) => {
     const { data: { user } } = await userClient.auth.getUser();
     if (!user) return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
+    const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
+
     const body = await req.json();
     const { kind, plan, tables, period, eventId, callbackUrl, restaurantId } = body as {
-      kind: "restaurant" | "event";
+      kind: "restaurant" | "event" | "pharmacy";
       plan?: string;
       tables?: number;
       period?: "monthly" | "annual";
@@ -85,9 +87,23 @@ Deno.serve(async (req) => {
     let amount = 0;
     let metadata: Record<string, unknown> = { kind, restaurant_id: restaurant.id, user_id: user.id };
 
-    if (kind === "restaurant") {
-      const tableCount = Math.max(1, tables || 1);
-      const monthly = tableCount * 2000;
+    if (kind === "restaurant" || kind === "pharmacy") {
+      let tableCount = Math.max(1, tables || 1);
+      let monthly = tableCount * 2000;
+      
+      if (kind === "pharmacy") {
+         if (plan === "Growth") {
+             monthly = 10000;
+         } else if (plan === "Business") {
+             monthly = 25000;
+         } else {
+             monthly = 5000; // Starter by default
+         }
+         tableCount = 1; // Unused for pharmacy but keeping structure
+         metadata.kind = "pharmacy";
+         metadata.plan = plan || "Starter";
+      }
+
       amount = period === "annual" ? monthly * 10 : monthly;
       metadata.tables = tableCount;
       metadata.period = period;
@@ -114,7 +130,7 @@ Deno.serve(async (req) => {
     const j = await r.json();
     if (!j.status) return new Response(JSON.stringify({ error: j.message || "Paystack init failed" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-    if (kind === "restaurant") {
+    if (kind === "restaurant" || kind === "pharmacy") {
       await admin.from("restaurants").update({ paystack_reference: ref }).eq("id", restaurant.id);
     } else {
       await admin.from("events").update({ paystack_reference: ref }).eq("id", eventId);

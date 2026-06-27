@@ -1,4 +1,20 @@
-export const formatNaira = (n: number) => `₦${Number(n || 0).toLocaleString("en-NG", { maximumFractionDigits: 0 })}`;
+/** Reads the saved currency symbol from the restaurant cache. Falls back to ₦ for existing Nigerian users. */
+const getCurrencySymbol = (): string => {
+  try {
+    const cached = localStorage.getItem("pharmiq_cached_restaurant");
+    if (cached) {
+      const r = JSON.parse(cached);
+      if (r?.currency_symbol) return r.currency_symbol;
+    }
+  } catch {}
+  return "₦";
+};
+
+export const formatCurrency = (n: number) =>
+  `${getCurrencySymbol()}${Number(n || 0).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+
+/** @deprecated Use formatCurrency instead. Kept for backward compatibility. */
+export const formatNaira = formatCurrency;
 
 export const timeAgo = (iso: string) => {
   const diff = Math.max(0, Date.now() - new Date(iso).getTime());

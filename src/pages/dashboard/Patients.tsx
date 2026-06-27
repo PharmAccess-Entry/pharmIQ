@@ -189,16 +189,16 @@ export default function Patients() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {filteredPatients.map((p) => (
-          <div key={p.id} className="bg-card border border-border rounded-2xl p-5 hover:border-primary/40 transition-all cursor-pointer group" onClick={() => openEdit(p)}>
-            <div className="flex items-start justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-lg">
+          <div key={p.id} className="bg-card border border-border rounded-2xl p-5 hover:border-primary/40 transition-all cursor-pointer group overflow-hidden relative" onClick={() => openEdit(p)}>
+            <div className="flex items-start justify-between mb-4 w-full">
+              <div className="flex items-center gap-3 min-w-0 w-full">
+                <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-lg shrink-0">
                   {p.name.charAt(0)}
                 </div>
-                <div>
-                  <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors">{p.name}</h3>
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <Phone className="w-3 h-3" /> {p.phone}
+                <div className="min-w-0 flex-1">
+                  <h3 className="font-semibold text-foreground group-hover:text-primary transition-colors truncate" title={p.name}>{p.name}</h3>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
+                    <Phone className="w-3 h-3 shrink-0" /> <span className="truncate">{p.phone}</span>
                   </div>
                 </div>
               </div>

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/lib/auth";
+import { detectCountryInfo } from "@/lib/countryDetect";
 
 export type Restaurant = {
   id: string;
@@ -27,6 +28,19 @@ export type Restaurant = {
   geofencing_enabled: boolean;
   geofencing_radius: number;
   is_accepting_orders?: boolean;
+  // Telegram (SaaS Architecture)
+  telegram_enabled?: boolean;
+  telegram_chat_id?: string | null;
+  telegram_username?: string | null;
+  telegram_connected_at?: string | null;
+  telegram_last_notified_at?: string | null;
+  telegram_notify_prefs?: Record<string, boolean> | null;
+  // Country / Currency
+  country?: string | null;
+  currency_code?: string | null;
+  currency_symbol?: string | null;
+  timezone?: string | null;
+  language?: string | null;
   active_event?: {
     id: string;
     name: string;
@@ -106,6 +120,25 @@ export const RestaurantProvider = ({ children }: { children: ReactNode }) => {
         setRole("owner");
         sessionStorage.setItem("st.role", "owner");
         localStorage.setItem("pharmiq_cached_restaurant", JSON.stringify(rData));
+
+        // Backfill: if country/currency not saved yet, detect silently in background
+        if (!rData.country && navigator.onLine) {
+          detectCountryInfo().then(async (info) => {
+            if (!info) return;
+            try {
+              await supabase.from("restaurants").update({
+                country: info.country,
+                currency_code: info.currency_code,
+                currency_symbol: info.currency_symbol,
+                timezone: info.timezone,
+                language: info.language,
+              }).eq("id", rData.id);
+              // Re-cache with new data
+              const updated = { ...rData, ...info };
+              localStorage.setItem("pharmiq_cached_restaurant", JSON.stringify(updated));
+            } catch {}
+          });
+        }
 
       } else if (!navigator.onLine && ownerErr) {
         // Fallback to local cache if completely offline

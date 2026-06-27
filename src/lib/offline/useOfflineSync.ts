@@ -63,6 +63,10 @@ export const useOfflineSync = () => {
           
           if (error) throw error;
         } 
+        else if (item.type === 'SALE_UPDATE') {
+          const { error } = await supabase.from('orders').update(item.payload.data).eq('id', item.payload.id);
+          if (error) throw error;
+        }
         else if (item.type === 'EXPENSE_CREATE') {
             const { error } = await supabase.from('expenses').insert(item.payload);
             if (error) throw error;
@@ -104,6 +108,12 @@ export const useOfflineSync = () => {
         }
         else if (item.type === 'PRODUCT_DELETE') {
             const { error } = await supabase.from('menu_items').delete().eq('id', item.payload.id);
+            if (error) throw error;
+        }
+        else if (item.type === 'TELEGRAM_NOTIFY') {
+            const { error } = await supabase.functions.invoke("telegram-notify", {
+              body: item.payload
+            });
             if (error) throw error;
         }
 

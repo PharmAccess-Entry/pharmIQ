@@ -25,6 +25,7 @@ import Payment from "./pages/Payment";
 import StaffInvite from "./pages/StaffInvite";
 import Contact from "./pages/Contact";
 import About from "./pages/About";
+import PharmacyPricing from "./pages/PharmacyPricing";
 
 import Dashboard from "./pages/dashboard/Dashboard";
 import MenuManagement from "./pages/dashboard/MenuManagement";
@@ -96,6 +97,7 @@ const App = () => (
                     <Route path="/about" element={<About />} />
                     <Route path="/payment" element={guard(<Payment />)} />
                     <Route path="/invite" element={<StaffInvite />} />
+                    <Route path="/pharmacy/pricing" element={<PharmacyPricing />} />
 
                     {/* Dashboard */}
                     <Route path="/dashboard" element={guard(<Dashboard />)} />

@@ -329,7 +329,7 @@ export default function Analytics() {
 
   // Staff Performance
   const staffPerformance = useMemo(() => {
-    const perf: Record<string, { name: string; orders: number; revenue: number }> = {};
+    const perf: Record<string, { staffId: string; name: string; orders: number; revenue: number }> = {};
     
     // Group only when viewing 'all' staff or evaluating the selected staff
     const ordersToEval = selectedStaff === "all" ? orders : orders.filter(o => o.user_id === selectedStaff);
@@ -344,7 +344,7 @@ export default function Analytics() {
         name = staffMember?.profile?.full_name || staffMember?.profile?.email || "Unknown Staff";
       }
 
-      if (!perf[staffId]) perf[staffId] = { name, orders: 0, revenue: 0 };
+      if (!perf[staffId]) perf[staffId] = { staffId, name, orders: 0, revenue: 0 };
       perf[staffId].orders += 1;
       perf[staffId].revenue += Number(o.total) || 0;
     });
@@ -732,7 +732,7 @@ export default function Analytics() {
                   {staffPerformance.map((s, i) => {
                     const pct = Math.round((s.revenue / (staffPerformance[0]?.revenue || 1)) * 100);
                     return (
-                      <div key={s.name}>
+                      <div key={s.staffId}>
                         <div className="flex items-center justify-between mb-1">
                           <div className="flex items-center gap-2">
                             <div className="h-7 w-7 rounded-lg bg-primary/10 text-primary text-xs font-black grid place-items-center shrink-0">

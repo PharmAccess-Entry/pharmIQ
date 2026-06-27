@@ -3,7 +3,7 @@ import { useAuth } from "@/lib/auth";
 import { supabase } from "@/integrations/supabase/client";
 import { Helmet } from "react-helmet-async";
 import {
-  Loader2, ShieldCheck, Users, Activity, ExternalLink, LogOut,
+  Loader2, ShieldCheck, Users, Activity, ExternalLink,
   DollarSign, Building, Calendar, Clock, Phone, ChevronLeft, ChevronRight,
   AlertTriangle, Star, Home, Search, Filter, Mail, UserX
 } from "lucide-react";
@@ -11,7 +11,6 @@ import { formatNaira } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { monthlyPriceForTables, annualPriceFor } from "@/lib/restaurantData";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
   DialogDescription, DialogFooter,
@@ -42,10 +41,6 @@ type AdminRow = {
   last_payment_at: string | null;
   phone: string | null;
   logo_url: string | null;
-  // Event aggregates (only meaningful for business_type = 'event')
-  total_events: number;
-  total_event_revenue: number;
-  has_future_paid_event: boolean;
   is_staff?: boolean;
 };
 
@@ -67,13 +62,6 @@ const getDisplayStatus = (r: AdminRow): string => {
     return "not_setup";
   }
 
-  if (r.business_type === "event") {
-    // Events: active only when there is at least one paid event with a future date.
-    // There is NO "trial" concept for events.
-    return r.has_future_paid_event ? "active" : "expired";
-  }
-
-  // Restaurant
   const raw = r.subscription_status || "trial";
   if (raw === "suspended") return "suspended";
 
@@ -88,26 +76,15 @@ const getDisplayStatus = (r: AdminRow): string => {
   return raw; // 'trial'
 };
 
-/** Subscription revenue PharmIQ earned from a single client */
-const restaurantSubRevenue = (r: AdminRow): number => {
-  if (r.subscription_status !== "active" || r.business_type === "event") return 0;
+/** Subscription revenue PharmIQ earned from a single pharmacy client */
+const pharmacySubRevenue = (r: AdminRow): number => {
+  if (r.subscription_status !== "active") return 0;
   
-  let monthly = 0;
-  if (r.business_type === "pharmacy") {
-    monthly = 5000;
-  } else {
-    // Handle legacy fixed-price plans from before the 2k/table dynamic pricing
-    const plan = r.subscription_plan?.toLowerCase() || "";
-    if (plan.includes("pro")) monthly = 15000;
-    else if (plan.includes("growth")) monthly = 10000;
-    else if (plan.includes("starter")) monthly = 5000;
-    else {
-      // New dynamic pricing
-      monthly = monthlyPriceForTables(r.table_count || 0);
-    }
-  }
-  
-  return r.subscription_period === "annual" ? annualPriceFor(monthly) : monthly;
+  let monthly = 5000; // Starter
+  if (r.subscription_plan === "Growth") monthly = 10000;
+  if (r.subscription_plan === "Business") monthly = 25000;
+
+  return r.subscription_period === "annual" ? monthly * 10 : monthly;
 };
 
 /** Human-readable display name for a row */
@@ -226,37 +203,23 @@ export default function SuperAdmin() {
 
       // ── Compute stats ──
       const totalUsers    = rows.length;
-      const restaurantCnt = rows.filter(r => r.business_type === "restaurant").length;
-      const pharmacyCnt   = rows.filter(r => r.business_type === "pharmacy").length;
-      const eventCnt      = rows.filter(r => r.business_type === "event").length;
+      const pharmacyCnt   = rows.filter(r => r.business_type === "pharmacy" || r.business_type === "restaurant").length;
       const notSetupCnt   = rows.filter(r => !r.id && !r.is_staff).length;
+      const staffCnt      = rows.filter(r => r.is_staff).length;
 
-      // Active = restaurant with non-expired active sub OR event with a future paid event
       const activeCnt = rows.filter(r => getDisplayStatus(r) === "active").length;
+      const trialCnt  = rows.filter(r => getDisplayStatus(r) === "trial").length;
 
-      // Tables only counted for restaurant-type owners (events use per-event tables)
-      const totalTables = rows
-        .filter(r => r.business_type === "restaurant")
-        .reduce((s, r) => s + (r.table_count || 0), 0);
-
-      // Revenue
-      const restRevenue = rows
-        .filter(r => r.business_type === "restaurant" || r.business_type === "pharmacy")
-        .reduce((s, r) => s + restaurantSubRevenue(r), 0);
-
-      const eventRevenue = rows
-        .filter(r => r.business_type === "event")
-        .reduce((s, r) => s + Number(r.total_event_revenue || 0), 0);
+      const totalRevenue = rows.reduce((s, r) => s + pharmacySubRevenue(r), 0);
 
       setStats({
         totalUsers,
-        restaurantCnt,
         pharmacyCnt,
-        eventCnt,
         notSetupCnt,
+        staffCnt,
         activeCnt,
-        totalTables,
-        totalPayments: restRevenue + eventRevenue,
+        trialCnt,
+        totalRevenue,
       });
     } catch (err: any) {
       console.error(err);
@@ -302,8 +265,7 @@ export default function SuperAdmin() {
   /** Revenue PharmIQ earned FROM this specific client */
   const clientRevenue = (r: AdminRow): number => {
     if (!r.id) return 0;
-    if (r.business_type === "event") return Number(r.total_event_revenue || 0);
-    return restaurantSubRevenue(r);
+    return pharmacySubRevenue(r);
   };
 
   const toggleStatus = async () => {
@@ -414,7 +376,7 @@ export default function SuperAdmin() {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 space-y-8">
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-2 lg:grid-cols-6 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
           <div className="bg-card border border-border rounded-2xl p-4 sm:p-5 shadow-soft">
             <div className="h-9 w-9 rounded-lg bg-primary-soft text-primary grid place-items-center mb-2">
               <Users className="h-4 w-4" />
@@ -427,24 +389,8 @@ export default function SuperAdmin() {
             <div className="h-9 w-9 rounded-lg bg-blue-500/10 text-blue-600 grid place-items-center mb-2">
               <Building className="h-4 w-4" />
             </div>
-            <div className="font-display text-xl sm:text-2xl font-bold">{stats?.restaurantCnt ?? 0}</div>
-            <div className="text-xs sm:text-sm text-muted-foreground mt-0.5">Pharmacies</div>
-          </div>
-
-          <div className="bg-card border border-border rounded-2xl p-4 sm:p-5 shadow-soft">
-            <div className="h-9 w-9 rounded-lg bg-emerald-500/10 text-emerald-600 grid place-items-center mb-2">
-              <Activity className="h-4 w-4" />
-            </div>
             <div className="font-display text-xl sm:text-2xl font-bold">{stats?.pharmacyCnt ?? 0}</div>
             <div className="text-xs sm:text-sm text-muted-foreground mt-0.5">Pharmacies</div>
-          </div>
-
-          <div className="bg-card border border-border rounded-2xl p-4 sm:p-5 shadow-soft">
-            <div className="h-9 w-9 rounded-lg bg-purple-500/10 text-purple-600 grid place-items-center mb-2">
-              <Calendar className="h-4 w-4" />
-            </div>
-            <div className="font-display text-xl sm:text-2xl font-bold">{stats?.eventCnt ?? 0}</div>
-            <div className="text-xs sm:text-sm text-muted-foreground mt-0.5">Event Owners</div>
           </div>
 
           <div className="bg-card border border-border rounded-2xl p-4 sm:p-5 shadow-soft">
@@ -457,17 +403,17 @@ export default function SuperAdmin() {
 
           <div className="bg-card border border-border rounded-2xl p-4 sm:p-5 shadow-soft">
             <div className="h-9 w-9 rounded-lg bg-amber-500/10 text-amber-600 grid place-items-center mb-2">
-              <Users className="h-4 w-4" />
+              <Clock className="h-4 w-4" />
             </div>
-            <div className="font-display text-xl sm:text-2xl font-bold">{stats?.totalTables ?? 0}</div>
-            <div className="text-xs sm:text-sm text-muted-foreground mt-0.5">Total Registers</div>
+            <div className="font-display text-xl sm:text-2xl font-bold">{stats?.trialCnt ?? 0}</div>
+            <div className="text-xs sm:text-sm text-muted-foreground mt-0.5">On Trial</div>
           </div>
 
           <div className="bg-card border border-border rounded-2xl p-4 sm:p-5 shadow-soft bg-primary-soft/30 border-primary/20">
             <div className="h-9 w-9 rounded-lg bg-primary/20 text-primary grid place-items-center mb-2">
               <DollarSign className="h-4 w-4" />
             </div>
-            <div className="font-display text-xl sm:text-2xl font-bold truncate text-primary">{formatNaira(stats?.totalPayments || 0)}</div>
+            <div className="font-display text-xl sm:text-2xl font-bold truncate text-primary">{formatNaira(stats?.totalRevenue || 0)}</div>
             <div className="text-xs sm:text-sm text-muted-foreground mt-0.5">Sub Revenue</div>
           </div>
         </div>
@@ -505,9 +451,7 @@ export default function SuperAdmin() {
                     </SelectTrigger>
                     <SelectContent className="rounded-xl">
                       <SelectItem value="all">All Types</SelectItem>
-                      <SelectItem value="restaurant">Pharmacies</SelectItem>
                       <SelectItem value="pharmacy">Pharmacies</SelectItem>
-                      <SelectItem value="event">Event Owners</SelectItem>
                       <SelectItem value="not_setup">Not Set Up</SelectItem>
                       <SelectItem value="staff">Staff</SelectItem>
                     </SelectContent>
@@ -574,19 +518,17 @@ export default function SuperAdmin() {
 
                     {/* Type */}
                     <td className="px-6 py-4 capitalize font-medium text-muted-foreground">
-                      {r.business_type
-                        ? (r.business_type === "event" ? "Event" : r.business_type === "pharmacy" ? "Pharmacy" : "Pharmacy")
+                      {r.business_type === "pharmacy" || r.business_type === "restaurant"
+                        ? "Pharmacy"
                         : (r.is_staff ? "Staff" : <span className="italic text-xs">—</span>)}
                     </td>
 
                     {/* Status */}
                     <td className="px-6 py-4"><StatusBadge r={r} /></td>
 
-                    {/* Tables */}
+                    {/* Registers */}
                     <td className="px-6 py-4 font-bold text-muted-foreground">
-                      {r.business_type === "event"
-                        ? <span title="Per-event tables, not a subscription count">—</span>
-                        : r.business_type === "pharmacy" ? <span title="Pharmacies don't use tables">—</span> : (r.table_count ?? "—")}
+                      {r.table_count ?? "—"}
                     </td>
 
                     {/* Actions */}
@@ -675,8 +617,8 @@ export default function SuperAdmin() {
                 <div className="bg-secondary/50 p-3 rounded-lg">
                   <p className="text-[10px] uppercase font-bold text-muted-foreground mb-1">Business Type</p>
                   <p className="font-medium capitalize">
-                    {selected.business_type
-                      ? (selected.business_type === "event" ? "Event Owner" : selected.business_type === "pharmacy" ? "Pharmacy" : "Pharmacy")
+                    {selected.business_type === "pharmacy" || selected.business_type === "restaurant"
+                      ? "Pharmacy"
                       : (selected.is_staff ? "Staff Member" : "Not set up")}
                   </p>
                 </div>
@@ -719,52 +661,27 @@ export default function SuperAdmin() {
               {/* Plan / Event info */}
               {selected.id && (
                 <div className="bg-primary/5 border border-primary/20 p-4 rounded-xl space-y-3">
-                  {selected.business_type === "event" ? (
-                    <>
-                      <p className="text-[10px] uppercase font-bold text-primary">Event Activity</p>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Total Events</span>
-                        <span className="font-bold">{selected.total_events}</span>
+                  <div className="flex justify-between items-center">
+                    <div className="min-w-0">
+                      <p className="text-[10px] uppercase font-bold text-primary">Subscription Info</p>
+                      <div className="text-sm font-medium mt-0.5">
+                        {selected.subscription_plan || (selected.subscription_status === "trial" ? "Free Trial" : "No Plan")}
+                        {selected.subscription_period && (
+                          <span className="ml-1 text-muted-foreground capitalize">· {selected.subscription_period}</span>
+                        )}
                       </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Paid Events</span>
-                        <span className="font-bold">{selected.paid_events}</span>
-                      </div>
-                      <div className="flex justify-between items-center pt-3 border-t border-primary/10">
-                        <div className="flex items-center gap-2 text-primary shrink-0">
-                          <Star className="h-4 w-4 shrink-0" />
-                          <p className="text-xs font-bold uppercase">Total Revenue Paid</p>
-                        </div>
-                        <span className="font-display font-black text-lg text-right">
-                          {formatNaira(Number(selected.total_event_revenue || 0))}
-                        </span>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="flex justify-between items-center">
-                        <div className="min-w-0">
-                          <p className="text-[10px] uppercase font-bold text-primary">Subscription Info</p>
-                          <div className="text-sm font-medium mt-0.5">
-                            {selected.subscription_plan || (selected.subscription_status === "trial" ? "Free Trial" : "No Plan")}
-                            {selected.subscription_period && (
-                              <span className="ml-1 text-muted-foreground capitalize">· {selected.subscription_period}</span>
-                            )}
-                          </div>
-                        </div>
-                        <span className="text-sm font-black shrink-0">{selected.table_count ?? 0} Registers</span>
-                      </div>
-                      <div className="flex justify-between items-center pt-3 border-t border-primary/10">
-                        <div className="flex items-center gap-2 text-primary shrink-0">
-                          <Star className="h-4 w-4 shrink-0" />
-                          <p className="text-xs font-bold uppercase">Revenue Paid</p>
-                        </div>
-                        <span className="font-display font-black text-lg text-right">
-                          {formatNaira(clientRevenue(selected))}
-                        </span>
-                      </div>
-                    </>
-                  )}
+                    </div>
+                    <span className="text-sm font-black shrink-0">{selected.table_count ?? 0} Registers</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-3 border-t border-primary/10">
+                    <div className="flex items-center gap-2 text-primary shrink-0">
+                      <Star className="h-4 w-4 shrink-0" />
+                      <p className="text-xs font-bold uppercase">Revenue Paid</p>
+                    </div>
+                    <span className="font-display font-black text-lg text-right">
+                      {formatNaira(clientRevenue(selected))}
+                    </span>
+                  </div>
                 </div>
               )}
 
@@ -820,8 +737,8 @@ export default function SuperAdmin() {
             </DialogTitle>
             <DialogDescription>
               {selected?.subscription_status === "suspended"
-                ? `Reactivating will restore their full dashboard access and allow customers to place orders again.`
-                : `Suspending will immediately revoke their dashboard access and block customer orders.`}
+                ? `Reactivating will restore their full dashboard access.`
+                : `Suspending will immediately revoke their dashboard access and block all sales.`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="mt-6">

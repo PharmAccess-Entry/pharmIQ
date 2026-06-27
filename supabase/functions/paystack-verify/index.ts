@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
         paid_at: new Date().toISOString(),
       }).eq("id", meta.event_id);
       await admin.from("restaurants").update({ active_event_id: meta.event_id }).eq("id", meta.restaurant_id);
-    } else if (meta.kind === "restaurant" && meta.restaurant_id) {
+    } else if ((meta.kind === "restaurant" || meta.kind === "pharmacy") && meta.restaurant_id) {
       const expiresAt = new Date();
       if (meta.period === "annual") {
         expiresAt.setFullYear(expiresAt.getFullYear() + 1);
@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
 
       await admin.from("restaurants").update({
         subscription_status: "active",
-        subscription_plan: meta.tables ? `Dynamic (${meta.tables} Tables)` : "Dynamic",
+        subscription_plan: meta.kind === "pharmacy" ? (meta.plan || "Starter") : (meta.tables ? `Dynamic (${meta.tables} Tables)` : "Dynamic"),
         table_count: meta.tables || 10,
         subscription_period: meta.period,
         last_payment_at: new Date().toISOString(),
@@ -75,7 +75,7 @@ Deno.serve(async (req) => {
               template: "payment_receipt",
               to: uData.user.email,
               data: {
-                description: meta.kind === "event" ? "SmartTable Event Setup" : `SmartTable Subscription (${meta.period})`,
+                description: meta.kind === "pharmacy" ? "PharmIQ Subscription Setup" : `PharmIQ Subscription (${meta.period})`,
                 amount: `NGN ${j.data.amount / 100}`,
                 reference: reference
               }

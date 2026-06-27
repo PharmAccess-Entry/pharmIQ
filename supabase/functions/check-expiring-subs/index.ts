@@ -66,7 +66,7 @@ Deno.serve(async (req) => {
             businessName: r.name,
             daysLeft,
             isSubscription: isSub,
-            upgradeUrl: "https://getsmarttable.com/login",
+            upgradeUrl: "https://pharmiq.site/login",
           },
         },
       });

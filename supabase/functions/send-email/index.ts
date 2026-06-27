@@ -14,7 +14,7 @@ const corsHeaders = {
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY") || "";
-const FROM = Deno.env.get("EMAIL_FROM") || "SmartTable <noreply@getsmarttable.com>";
+const FROM = Deno.env.get("EMAIL_FROM") || "PharmIQ <noreply@pharmiq.site>";
 
 type Payload = {
   template: "welcome" | "payment_receipt" | "trial_ending" | "staff_invite" | "forgot_password";
@@ -38,7 +38,7 @@ const wrap = (title: string, subtitle: string, html: string, icon: string = "✨
           <tr>
             <td style="background:linear-gradient(135deg,#BE123C 0%,#E11D48 55%,#FB7185 100%);padding:40px 32px;text-align:center;">
               <div style="display:inline-block;background:rgba(255,255,255,0.18);border:1.5px solid rgba(255,255,255,0.35);border-radius:14px;padding:10px 22px;margin-bottom:18px;">
-                <span style="font-size:20px;font-weight:800;color:#ffffff;letter-spacing:-0.5px;">Smart<span style="opacity:0.8;">Table</span></span>
+                <span style="font-size:20px;font-weight:800;color:#ffffff;letter-spacing:-0.5px;">Pharm<span style="opacity:0.8;">IQ</span></span>
               </div>
               <div style="display:inline-block;background:rgba(255,255,255,0.2);border-radius:50%;width:60px;height:60px;line-height:60px;font-size:28px;margin-bottom:14px;">
                 ${icon}
@@ -59,10 +59,10 @@ const wrap = (title: string, subtitle: string, html: string, icon: string = "✨
           <tr>
             <td style="background:#FFF1F2;padding:20px 32px;border-top:1px solid #fce7eb;text-align:center;">
               <p style="margin:0 0 4px;font-size:13px;color:#6B7280;">
-                Need help? Reach us at <a href="mailto:hello@getsmarttable.com" style="color:#E11D48;text-decoration:none;">hello@getsmarttable.com</a>
+                Need help? Reach us at <a href="mailto:hello@pharmiq.site" style="color:#E11D48;text-decoration:none;">hello@pharmiq.site</a>
               </p>
               <p style="margin:0;font-size:12px;color:#9CA3AF;">
-                &copy; ${new Date().getFullYear()} SmartTable Nigeria &nbsp;·&nbsp; <a href="https://getsmarttable.com" style="color:#9CA3AF;text-decoration:none;">getsmarttable.com</a>
+                &copy; ${new Date().getFullYear()} PharmIQ &nbsp;·&nbsp; <a href="https://pharmiq.site" style="color:#9CA3AF;text-decoration:none;">pharmiq.site</a>
               </p>
             </td>
           </tr>
@@ -90,12 +90,12 @@ const renderTemplate = (template: Payload["template"], data: Record<string, any>
   switch (template) {
     case "welcome":
       return {
-        subject: `Welcome to SmartTable, ${data.businessName || "friend"}! 🎉`,
+        subject: `Welcome to PharmIQ, ${data.businessName || "friend"}! 🎉`,
         html: wrap(
           `Welcome aboard!`,
-          `You're one step away from transforming your restaurant`,
+          `You're one step away from transforming your pharmacy`,
           `${intro}
-           <p style="margin:0 0 28px;font-size:16px;line-height:1.7;color:#374151;">Your free 3-day trial has started. Let's get your menu set up and generate your QR codes.</p>
+           <p style="margin:0 0 28px;font-size:16px;line-height:1.7;color:#374151;">Your free 3-day trial has started. Let's get your inventory set up and your team onboarded.</p>
            ${btn(data.dashboardUrl || "#", "🚀 &nbsp;Go to Dashboard")}`,
           "🎉"
         ),
@@ -119,12 +119,12 @@ const renderTemplate = (template: Payload["template"], data: Record<string, any>
     case "trial_ending": {
       const isSub = data.isSubscription;
       const tSubject = isSub 
-        ? `Your SmartTable subscription expires in ${data.daysLeft || "a few"} day${data.daysLeft === 1 ? "" : "s"}`
-        : `Your SmartTable trial ends in ${data.daysLeft || "a few"} day${data.daysLeft === 1 ? "" : "s"}`;
+        ? `Your PharmIQ subscription expires in ${data.daysLeft || "a few"} day${data.daysLeft === 1 ? "" : "s"}`
+        : `Your PharmIQ trial ends in ${data.daysLeft || "a few"} day${data.daysLeft === 1 ? "" : "s"}`;
       
       const tText = isSub
         ? `<p style="margin:0 0 28px;font-size:16px;line-height:1.7;color:#374151;">Your subscription expires in <strong>${data.daysLeft || "a few"} day(s)</strong>. Ensure uninterrupted service by renewing your plan today.</p>`
-        : `<p style="margin:0 0 28px;font-size:16px;line-height:1.7;color:#374151;">Your free trial ends in <strong>${data.daysLeft || "a few"} day(s)</strong>. Keep your QR menu and orders running by picking a plan!</p>`;
+        : `<p style="margin:0 0 28px;font-size:16px;line-height:1.7;color:#374151;">Your free trial ends in <strong>${data.daysLeft || "a few"} day(s)</strong>. Keep your pharmacy running smoothly by picking a plan!</p>`;
       
       return {
         subject: tSubject,
@@ -138,12 +138,12 @@ const renderTemplate = (template: Payload["template"], data: Record<string, any>
     }
     case "staff_invite":
       return {
-        subject: `${data.inviterName || "Your team"} invited you to ${data.businessName || "SmartTable"}`,
+        subject: `${data.inviterName || "Your team"} invited you to ${data.businessName || "PharmIQ"}`,
         html: wrap(
           `You're Invited!`,
-          `Join your team on SmartTable`,
+          `Join your team on PharmIQ`,
           `${intro}
-           <p style="margin:0 0 28px;font-size:16px;line-height:1.7;color:#374151;"><strong>${data.inviterName || "A teammate"}</strong> invited you to join <strong>${data.businessName || "their business"}</strong> on SmartTable as a <strong>${data.role || "staff"}</strong>.</p>
+           <p style="margin:0 0 28px;font-size:16px;line-height:1.7;color:#374151;"><strong>${data.inviterName || "A teammate"}</strong> invited you to join <strong>${data.businessName || "their pharmacy"}</strong> on PharmIQ as a <strong>${data.role || "staff"}</strong>.</p>
            ${btn(data.inviteUrl, "🤝 &nbsp;Accept Invite")}
            <p style="color:#6B7280;font-size:13px;text-align:center;">This link expires in 14 days.</p>`,
           "👋"
@@ -151,7 +151,7 @@ const renderTemplate = (template: Payload["template"], data: Record<string, any>
       };
     case "forgot_password":
       return {
-        subject: `Reset your SmartTable password`,
+        subject: `Reset your PharmIQ password`,
         html: wrap(
           `Password Reset Request`,
           `We received a request to reset your password`,

@@ -129,10 +129,38 @@ const Dashboard = () => {
       const since = new Date(Date.now() - 365 * 86400_000).toISOString();
       const { data } = await supabase
         .from("orders")
-        .select("total, status, created_at, table_number, payment_status")
+        .select("id, short_code, table_number, total, status, created_at, payment_status, user_id, order_items(menu_item_id, name, qty, price, cost_price, item_intent)")
         .eq("restaurant_id", rid)
         .gte("created_at", since);
-      setAllOrders(data || []);
+      if (data) {
+        setAllOrders(data as any);
+        // Mirror into Dexie so offline dashboard can read real revenue data
+        try {
+          const { db } = await import("@/lib/offline/db");
+          const rows = (data as any[]).map(o => ({
+            id: o.id,
+            restaurant_id: rid,
+            user_id: o.user_id || "",
+            short_code: o.short_code || "",
+            table_number: o.table_number || "Walk-in",
+            status: o.status,
+            payment_status: o.payment_status || "unpaid",
+            total: Number(o.total) || 0,
+            created_at: o.created_at,
+            order_items: (o.order_items || []).map((i: any) => ({
+              menu_item_id: i.menu_item_id,
+              name: i.name,
+              qty: i.qty,
+              price: i.price,
+              cost_price: i.cost_price,
+              item_intent: i.item_intent || "take-away",
+            })),
+          }));
+          await db.sales.bulkPut(rows);
+        } catch (e) {
+          console.warn("[Dashboard] Failed to cache sales to Dexie:", e);
+        }
+      }
     };
     
     const loadAllRequests = async () => {
@@ -198,10 +226,8 @@ const Dashboard = () => {
             .where('restaurant_id').equals(rid)
             .toArray();
 
-          const costByItemId = new Map<string, number>(allLocalProducts.map(p => [p.id, 0]));
-          // products don't store cost_price in OfflineProduct schema — use 0 as fallback
           const invValue = allLocalProducts.reduce((sum, p) =>
-            sum + (p.stock_quantity || 0) * 0, 0); // cost_price not cached; inventory count still correct
+            sum + (p.stock_quantity || 0) * (p.cost_price || 0), 0);
           setInventoryValue(invValue);
 
           // COGS from today's local sales order_items
@@ -428,13 +454,13 @@ const Dashboard = () => {
   const stats = isEvent ? [
     { label: "Orders today", value: String(todayOrders.length), icon: ShoppingBag },
     { label: "Active queues", value: `${activeTablesCount}`, icon: Users },
-    { label: "Pending orders", value: String(orders.filter((o) => o.status === "pending").length), icon: Clock },
+    { label: "Pending transfers", value: String(allOrders.filter((o) => o.status === "served" && o.payment_status === "unpaid").length), icon: Clock },
     { label: "Events", value: String(events.length), icon: TrendingUp },
   ] : [
     { label: "Today's revenue", value: formatNaira(todayRevenue), icon: TrendingUp },
     { label: "Profit Today", value: formatNaira(todayRevenue - todayCogs), icon: TrendingUp },
     { label: "Inventory Value", value: formatNaira(inventoryValue), icon: Package },
-    { label: "Pending", value: String(orders.filter((o) => o.status === "pending").length), icon: Clock },
+    { label: "Pending transfers", value: String(allOrders.filter((o) => o.status === "served" && o.payment_status === "unpaid").length), icon: Clock },
   ];
 
   const isSuspended = restaurant?.subscription_status === "suspended";

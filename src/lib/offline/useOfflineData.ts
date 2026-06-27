@@ -248,6 +248,7 @@ export function useOfflineProducts(restaurantId: string | undefined) {
       if (data) {
         const rows = (data as any[]).map(item => ({
           ...item,
+          cost_price: item.cost_price ?? null,
           last_synced_at: Date.now(),
         })) as OfflineProduct[];
         // bulkPut merges — products table already has the POS using it

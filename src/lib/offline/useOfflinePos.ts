@@ -44,6 +44,7 @@ export function useOfflinePos(restaurantId: string | undefined, userId: string |
         name: item.name,
         description: item.description,
         price: item.price,
+        cost_price: item.cost_price ?? null,
         category: item.category,
         image: item.image_url, // map correctly
         available: item.available,

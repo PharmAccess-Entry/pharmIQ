@@ -6,6 +6,7 @@ export interface OfflineProduct {
   name: string;
   description: string | null;
   price: number;
+  cost_price?: number | null;
   category: string;
   image: string | null;
   available: boolean;
@@ -47,7 +48,7 @@ export interface OfflineSale {
 export interface OfflineAction {
   id: string; // uuid
   restaurant_id: string;
-  type: 'SALE_CREATE' | 'REFUND_CREATE' | 'STOCK_UPDATE' | 'EXPENSE_CREATE' | 'SHIFT_CREATE' | 'SHIFT_CLOSE' | 'PATIENT_CREATE' | 'PATIENT_UPDATE' | 'SUPPLIER_CREATE' | 'SUPPLIER_UPDATE' | 'PRODUCT_CREATE' | 'PRODUCT_UPDATE' | 'PRODUCT_DELETE';
+  type: 'SALE_CREATE' | 'SALE_UPDATE' | 'REFUND_CREATE' | 'STOCK_UPDATE' | 'EXPENSE_CREATE' | 'SHIFT_CREATE' | 'SHIFT_CLOSE' | 'PATIENT_CREATE' | 'PATIENT_UPDATE' | 'SUPPLIER_CREATE' | 'SUPPLIER_UPDATE' | 'PRODUCT_CREATE' | 'PRODUCT_UPDATE' | 'PRODUCT_DELETE' | 'TELEGRAM_NOTIFY';
   payload: any;
   status: 'pending' | 'syncing' | 'failed' | 'conflict';
   attempts: number;

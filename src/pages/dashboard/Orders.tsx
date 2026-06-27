@@ -1,9 +1,9 @@
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "./Dashboard";
-import { UtensilsCrossed, ShoppingBasket, Shuffle, MessageCircle, FileDown, FileText, Check, Loader2 } from "lucide-react";
+import { FileDown, FileText, Check, Loader2, User } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useRestaurant } from "@/lib/restaurant";
 import { formatNaira } from "@/lib/format";
@@ -26,10 +26,14 @@ type Order = {
   total: number;
   created_at: string;
   payment_status: string;
+  user_id?: string | null;
+  staff_name?: string | null;
   order_items?: { name: string; qty: number; item_intent: string | null }[];
 };
 
-const tabs = ["completed", "pending", "pending_transfer"] as const;
+type StaffMember = { id: string; name: string };
+
+const tabs = ["completed", "pending_transfer"] as const;
 type Tab = (typeof tabs)[number];
 
 // IntentBadge removed as per pharmacy workflow
@@ -51,9 +55,15 @@ const Orders = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
-  const [counts, setCounts] = useState<Record<string, number>>({ pending: 0, preparing: 0, served: 0 });
+  const [counts, setCounts] = useState<Record<string, number>>({ pending_transfer: 0, completed: 0 });
   const loaderRef = useRef<HTMLDivElement>(null);
   const isOffline = useOfflineStatus();
+
+  // Staff filter
+  const [staffList, setStaffList] = useState<StaffMember[]>([]);
+  const [staffFilter, setStaffFilter] = useState<string>("all");
+  // Map of user_id -> display name (populated once per load)
+  const [staffNameMap, setStaffNameMap] = useState<Record<string, string>>({});
 
   const dateFilterRange = useMemo(() => {
     const now = new Date();
@@ -74,18 +84,40 @@ const Orders = () => {
     return { from, to };
   }, [exportRange, startDate, endDate]);
 
+  // Fetch staff list for the filter dropdown
+  const fetchStaffList = useCallback(async () => {
+    if (!restaurant?.id || !navigator.onLine) return;
+    const { data } = await supabase
+      .from("user_roles")
+      .select("user_id")
+      .eq("restaurant_id", restaurant.id);
+    if (!data || data.length === 0) return;
+    const ids = data.map(r => r.user_id);
+    const { data: users } = await supabase.rpc("get_users_by_ids", { user_ids: ids });
+    if (users) {
+      const map: Record<string, string> = {};
+      const list: StaffMember[] = [];
+      for (const u of users) {
+        const name = u.full_name || u.email || u.id;
+        map[u.id] = name;
+        list.push({ id: u.id, name });
+      }
+      setStaffNameMap(map);
+      setStaffList(list);
+    }
+  }, [restaurant?.id]);
+
+  useEffect(() => { fetchStaffList(); }, [fetchStaffList]);
+
   const fetchOrders = async (pageNum: number, currentOrders: Order[], isRefresh = false) => {
     if (!restaurant?.id) return;
     if (!navigator.onLine) {
-      // Offline: load from Dexie db.sales
       try {
         const { db } = await import("@/lib/offline/db");
         let rows = await db.sales
           .where('restaurant_id').equals(restaurant.id)
           .reverse()
           .sortBy('created_at');
-
-        // Filter by tab
         if (tab === 'completed') {
           rows = rows.filter(o => ['completed', 'cancelled', 'refunded'].includes(o.status));
         } else if (tab === 'pending_transfer') {
@@ -93,7 +125,7 @@ const Orders = () => {
         } else {
           rows = rows.filter(o => o.status === tab);
         }
-
+        if (staffFilter !== 'all') rows = rows.filter(o => o.user_id === staffFilter);
         setOrders(rows as any[]);
       } catch (e) {
         console.error('Offline order load failed:', e);
@@ -104,12 +136,12 @@ const Orders = () => {
     }
 
     if (!isRefresh) setIsLoading(true);
-    
+
     let q = supabase
       .from("orders")
-      .select("id, short_code, table_number, intent, status, total, created_at, payment_status, customer_name, order_items(name, qty, price, item_intent)", { count: "exact" })
+      .select("id, short_code, table_number, intent, status, total, created_at, payment_status, customer_name, user_id, order_items(name, qty, price, item_intent)", { count: "exact" })
       .eq("restaurant_id", restaurant.id);
-      
+
     if (tab === "completed") {
       q = q.or('status.in.(cancelled,refunded,completed),and(status.eq.served,payment_status.neq.unpaid)');
     } else if (tab === "pending_transfer") {
@@ -117,21 +149,27 @@ const Orders = () => {
     } else {
       q = q.eq("status", tab);
     }
+    if (staffFilter !== 'all') q = q.eq("user_id", staffFilter);
     if (exportRange !== "all") {
       q = q.gte("created_at", dateFilterRange.from.toISOString());
       q = q.lte("created_at", dateFilterRange.to.toISOString());
     }
-    
+
     q = q.order("created_at", { ascending: false }).range(isRefresh ? 0 : pageNum * PAGE_SIZE, isRefresh ? Math.max((page + 1) * PAGE_SIZE, PAGE_SIZE) - 1 : (pageNum + 1) * PAGE_SIZE - 1);
-    
+
     const { data, count } = await q;
-    
+
     if (data) {
+      // Attach staff names from our local map
+      const enriched = (data as any[]).map(o => ({
+        ...o,
+        staff_name: staffNameMap[o.user_id] || null,
+      }));
       if (isRefresh) {
-        setOrders(data as any);
+        setOrders(enriched);
       } else {
-        if (pageNum === 0) setOrders(data as any);
-        else setOrders([...currentOrders, ...(data as any)]);
+        if (pageNum === 0) setOrders(enriched);
+        else setOrders([...currentOrders, ...enriched]);
         setHasMore((pageNum + 1) * PAGE_SIZE < (count || 0));
       }
     }
@@ -160,17 +198,16 @@ const Orders = () => {
     const { data } = await q;
     if (!data) return;
 
-    const pending = data.filter(o => o.status === "pending").length;
     const pending_transfer = data.filter(o => o.status === "served" && o.payment_status === "unpaid").length;
     const completed = data.filter(o => o.status === "completed").length;
-    setCounts({ pending, pending_transfer, completed });
+    setCounts({ pending_transfer, completed });
   };
 
   useEffect(() => {
     setPage(0);
     fetchOrders(0, []);
     fetchCounts();
-  }, [restaurant?.id, tab, exportRange, startDate, endDate]);
+  }, [restaurant?.id, tab, exportRange, startDate, endDate, staffFilter, staffNameMap]);
 
   useEffect(() => {
     const rid = restaurant?.id;
@@ -350,58 +387,88 @@ const Orders = () => {
           <span>You're offline — showing orders placed on this device. Sync will resume when reconnected.</span>
         </div>
       )}
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-display text-3xl font-bold">Orders</h1>
-          <p className="text-muted-foreground mt-1">Tap an order to chat with the customer or confirm payment.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto justify-end">
-          <Select value={exportRange} onValueChange={(v: any) => setExportRange(v)}>
-            <SelectTrigger className="h-9 w-32 focus:ring-primary rounded-xl font-bold text-xs uppercase tracking-wider">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="today">Today</SelectItem>
-              <SelectItem value="7d">Last 7 Days</SelectItem>
-              <SelectItem value="30d">Last 30 Days</SelectItem>
-              <SelectItem value="custom">Custom Range</SelectItem>
-              <SelectItem value="all">All Time</SelectItem>
-            </SelectContent>
-          </Select>
+      <div className="mb-6 flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="font-display text-3xl font-bold">Orders</h1>
+            <p className="text-muted-foreground mt-1">Tap an order to view details or confirm payment.</p>
+          </div>
+          <div className="flex items-center gap-1.5 w-full sm:w-auto justify-between sm:justify-end overflow-x-auto pb-1 sm:pb-0 no-scrollbar">
+            {/* Staff filter — visible to manager/owner only */}
+            {(role === 'owner' || role === 'manager') && staffList.length > 1 && (
+              <Select value={staffFilter} onValueChange={setStaffFilter}>
+                <SelectTrigger className="h-9 w-[110px] sm:w-40 focus:ring-primary rounded-xl font-bold text-xs shrink-0">
+                  <div className="flex items-center min-w-0">
+                    <User className="h-3 w-3 mr-1 text-muted-foreground shrink-0" />
+                    <span className="truncate"><SelectValue placeholder="All Staff" /></span>
+                  </div>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Staff</SelectItem>
+                  {staffList.map(s => (
+                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
 
-          {exportRange === "custom" && (
-            <div className="flex items-center gap-1.5 animate-in fade-in slide-in-from-right-2">
-              <CustomDatePicker 
-                value={startDate} 
-                onChange={setStartDate} 
-                className="h-9 w-[130px] px-2 py-1.5 rounded-xl text-xs font-bold focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-              <span className="text-muted-foreground text-[10px] font-bold">to</span>
-              <CustomDatePicker 
-                value={endDate} 
-                onChange={setEndDate} 
-                className="h-9 w-[130px] px-2 py-1.5 rounded-xl text-xs font-bold focus:outline-none focus:ring-1 focus:ring-primary"
-              />
+            <Select value={exportRange} onValueChange={(v: any) => setExportRange(v)}>
+              <SelectTrigger className="h-9 w-[90px] sm:w-32 focus:ring-primary rounded-xl font-bold text-[10px] sm:text-xs uppercase tracking-wider shrink-0">
+                <span className="truncate"><SelectValue /></span>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="today">Today</SelectItem>
+                <SelectItem value="7d">Last 7 Days</SelectItem>
+                <SelectItem value="30d">Last 30 Days</SelectItem>
+                <SelectItem value="custom">Custom</SelectItem>
+                <SelectItem value="all">All Time</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <div className="flex items-center gap-1.5 shrink-0 ml-auto">
+              <Button size="icon" className="h-9 w-9 sm:w-auto sm:px-3 rounded-xl" variant="outline" onClick={onExportCSV} disabled={isExporting} title="Export CSV">
+                {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileDown className="h-3.5 w-3.5 sm:mr-1.5" />}
+                <span className="hidden sm:inline text-xs font-bold">CSV</span>
+              </Button>
+              <Button size="icon" className="h-9 w-9 sm:w-auto sm:px-3 rounded-xl" variant="outline" onClick={onExportPDF} disabled={isExporting} title="Export PDF">
+                {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5 sm:mr-1.5" />}
+                <span className="hidden sm:inline text-xs font-bold">PDF</span>
+              </Button>
             </div>
-          )}
-          <div className="flex items-center gap-1.5 ml-auto sm:ml-0">
-            <Button size="sm" variant="outline" onClick={onExportCSV} disabled={isExporting}>
-              {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileDown className="h-3.5 w-3.5" />}CSV
-            </Button>
-            <Button size="sm" variant="outline" onClick={onExportPDF} disabled={isExporting}>
-              {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileText className="h-3.5 w-3.5" />}PDF
-            </Button>
           </div>
         </div>
+
+        {/* Custom date range row — appears below when Custom is selected */}
+        {exportRange === "custom" && (
+          <div className="flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
+            <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider whitespace-nowrap">Date range:</span>
+            <CustomDatePicker
+              value={startDate}
+              onChange={setStartDate}
+              className="h-9 flex-1 sm:flex-none sm:w-[140px] px-3 py-1.5 rounded-xl text-xs font-bold focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+            <span className="text-muted-foreground text-[10px] font-bold">to</span>
+            <CustomDatePicker
+              value={endDate}
+              onChange={setEndDate}
+              className="h-9 flex-1 sm:flex-none sm:w-[140px] px-3 py-1.5 rounded-xl text-xs font-bold focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+          </div>
+        )}
       </div>
 
       <div className="flex gap-2 mb-5 overflow-x-auto pb-1">
         {tabs.map((t) => (
           <button key={t} onClick={() => setTab(t)} className={`px-3 sm:px-4 py-2 rounded-full text-xs sm:text-sm font-medium whitespace-nowrap capitalize transition-smooth ${tab === t ? "bg-primary text-primary-foreground shadow-sm" : "bg-card border border-border text-muted-foreground hover:text-foreground"}`}>
-            {labelFor(t)} {t !== "Active" && t !== "history" && <span className="ml-1 opacity-70">{counts[t] || 0}</span>}
+            {labelFor(t)} <span className="ml-1 opacity-70">{counts[t] || 0}</span>
           </button>
         ))}
       </div>
+      {tab === 'pending' && counts['pending'] === 0 && !initialLoad && (
+        <div className="mb-4 px-4 py-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-700 dark:text-blue-300 text-sm">
+          ℹ️ In pharmacy mode, sales are completed instantly at the POS — orders don't queue here. This tab shows 0 as expected.
+        </div>
+      )}
 
       <div className="space-y-3">
         {initialLoad
@@ -439,6 +506,15 @@ const Orders = () => {
                       <span key={idx}>{idx > 0 && ", "}{i.qty}× {i.name}</span>
                     ))}
                   </p>
+                  {/* Staff attribution badge */}
+                  {(o.staff_name || (o.user_id && staffNameMap[o.user_id])) && (
+                    <div className="flex items-center gap-1 mt-1.5">
+                      <User className="h-3 w-3 text-muted-foreground" />
+                      <span className="text-[11px] text-muted-foreground font-medium">
+                        {o.staff_name || staffNameMap[o.user_id!]}
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div className="text-right shrink-0">
                   <div className="font-display font-bold">{formatNaira(Number(o.total))}</div>

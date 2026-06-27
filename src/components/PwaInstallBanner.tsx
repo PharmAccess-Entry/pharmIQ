@@ -121,13 +121,13 @@ export const PwaInstallBanner = () => {
   if (!visible) return null;
 
   const content = isDashboard ? {
-    title: "Add to Home Screen",
-    desc: "Manage orders without the browser",
-    button: "Install Dashboard"
+    title: "Install",
+    desc: "Add to home screen",
+    button: "Install"
   } : {
-    title: "Install Scanner App",
-    desc: "Scan QR codes and access menus faster",
-    button: "Get App"
+    title: "Install Scanner",
+    desc: "Add to home screen",
+    button: "Install"
   };
 
   return (

@@ -8,7 +8,7 @@ const corsHeaders = {
 };
 
 // Use environment variable in production, fallback to provided token
-const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") || "8584487404:AAFgT2Ex3m2uy0gUgwkGAOIcgrWsclF0Cao";
+const BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") || "8959478563:AAHKTrDoxZnX8L7gmhsd_cJiQrqRIEnwpu4";
 const ALLOWED_ADMIN_ID = 8316379364;
 const ADMIN_EMAIL = "lightorbinnovations@gmail.com";
 
@@ -73,7 +73,7 @@ serve(async (req) => {
       type: "magiclink",
       email: ADMIN_EMAIL,
       options: {
-        redirectTo: redirectUrl || "https://getsmarttable.com/super-admin"
+        redirectTo: redirectUrl || "https://pharmiq.site/super-admin"
       }
     });
 
