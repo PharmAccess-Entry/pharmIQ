@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ListChecks, AlertTriangle, CheckCircle2, TrendingDown, WifiOff } from "lucide-react";
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
+import { CardGridSkeleton } from "@/components/LoadingState";
 
 export default function Reconciliation() {
   const { restaurant, role } = useRestaurant();
@@ -322,7 +323,7 @@ export default function Reconciliation() {
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {loading ? (
-              <p className="text-muted-foreground p-4">Loading history...</p>
+              <CardGridSkeleton count={3} />
             ) : reconciliations.length === 0 ? (
               <div className="col-span-full p-12 text-center text-muted-foreground bg-card border border-border rounded-xl">
                 <AlertTriangle className="h-10 w-10 mx-auto mb-3 opacity-20" />

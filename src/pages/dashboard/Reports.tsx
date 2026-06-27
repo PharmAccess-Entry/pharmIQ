@@ -10,6 +10,7 @@ import { format } from "date-fns";
 import { FileText, Tags, Printer, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
+import { CardGridSkeleton } from "@/components/LoadingState";
 
 export default function Reports() {
   const { restaurant } = useRestaurant();
@@ -18,6 +19,7 @@ export default function Reports() {
   
   // Data states
   const [inventoryData, setInventoryData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   
   useEffect(() => {
     if (!restaurant?.id) return;
@@ -38,6 +40,7 @@ export default function Reports() {
         const rows = await db.products.where("restaurant_id").equals(restaurant.id).filter(r => !!r.track_inventory).sortBy("name");
         setInventoryData(rows as any[]);
       }
+      setLoading(false);
     };
     
     fetchInventory();
@@ -99,11 +102,11 @@ export default function Reports() {
           </TabsList>
           
           <TabsContent value="stock_count">
-            <ReportViewer config={stockCountConfig} />
+            {loading ? <CardGridSkeleton count={2} /> : <ReportViewer config={stockCountConfig} />}
           </TabsContent>
           
           <TabsContent value="valuation">
-            <ReportViewer config={inventoryValuationConfig} />
+            {loading ? <CardGridSkeleton count={2} /> : <ReportViewer config={inventoryValuationConfig} />}
           </TabsContent>
 
           <TabsContent value="barcodes">
@@ -116,7 +119,9 @@ export default function Reports() {
                 <Button onClick={() => window.print()} className="gap-2 shrink-0 w-full sm:w-auto"><Printer className="h-4 w-4" /> Print Labels</Button>
               </div>
               <div className="border bg-gray-50/50 dark:bg-secondary/20 p-4 rounded-lg overflow-y-auto max-h-[60vh]">
-                {barcodeItems.length === 0 ? (
+                {loading ? (
+                  <CardGridSkeleton count={2} />
+                ) : barcodeItems.length === 0 ? (
                   <p className="text-center text-muted-foreground py-10">No products with barcodes found.</p>
                 ) : (
                   <PrintBarcodeLabels items={barcodeItems} />

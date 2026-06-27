@@ -8,14 +8,17 @@ import { format } from "date-fns";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function SyncStatus() {
   const { isOnline, isSyncing, queueSize, lastSyncTime, triggerSync } = useOfflineSync();
   const [queue, setQueue] = useState<OfflineAction[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const loadQueue = async () => {
     const items = await db.offline_queue.orderBy("created_at").reverse().toArray();
     setQueue(items);
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -106,7 +109,17 @@ export default function SyncStatus() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {queue.length === 0 ? (
+              {loading ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <TableRow key={i}>
+                    <TableCell><Skeleton className="h-4 w-24 rounded-md" /></TableCell>
+                    <TableCell><Skeleton className="h-5 w-20 rounded-full" /></TableCell>
+                    <TableCell><Skeleton className="h-5 w-16 rounded-full" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-8 rounded-md" /></TableCell>
+                    <TableCell><Skeleton className="h-4 w-32 rounded-md" /></TableCell>
+                  </TableRow>
+                ))
+              ) : queue.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center py-12 text-muted-foreground">
                     <CheckCircle2 className="h-8 w-8 mx-auto mb-3 opacity-20" />

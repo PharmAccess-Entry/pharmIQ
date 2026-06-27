@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
 import { WifiOff } from "lucide-react";
+import { CardGridSkeleton, ListRowSkeleton } from "@/components/LoadingState";
 
 export default function ShiftManagement() {
   const { restaurant, role } = useRestaurant();
@@ -250,7 +251,11 @@ export default function ShiftManagement() {
             <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
             Active Shifts ({activeShifts.length})
           </h2>
-          {activeShifts.length === 0 ? (
+          {loading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <CardGridSkeleton count={3} />
+            </div>
+          ) : activeShifts.length === 0 ? (
             <div className="bg-card border border-dashed border-border rounded-xl p-8 text-center text-muted-foreground text-sm">
               No active shifts right now. Cashiers can open a shift from the POS screen.
             </div>
@@ -327,7 +332,9 @@ export default function ShiftManagement() {
             <AlertTriangle className="h-5 w-5 text-amber-500" />
             Awaiting Settlement ({completedShifts.length})
           </h2>
-          {completedShifts.length === 0 ? (
+          {loading ? (
+            <ListRowSkeleton count={3} />
+          ) : completedShifts.length === 0 ? (
             <div className="bg-card border border-dashed border-border rounded-xl p-6 text-center text-muted-foreground text-sm">
               No shifts waiting for admin settlement.
             </div>
@@ -405,7 +412,9 @@ export default function ShiftManagement() {
             <CheckCircle2 className="h-5 w-5 text-emerald-500" />
             Settled History ({settledShifts.length})
           </h2>
-          {settledShifts.length === 0 ? (
+          {loading ? (
+            <ListRowSkeleton count={5} />
+          ) : settledShifts.length === 0 ? (
             <div className="bg-card border border-dashed border-border rounded-xl p-6 text-center text-muted-foreground text-sm">
               No settled shifts yet.
             </div>
