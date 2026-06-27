@@ -99,19 +99,18 @@ export default function Expenses() {
     setSaving(true);
     const { v4: uuidv4 } = await import("uuid");
     const now = new Date().toISOString();
-    const payload: any = {
+    const supabasePayload = {
       id: uuidv4(),
       restaurant_id: rid,
       category: form.category,
       amount: Number(form.amount),
       description: form.description || null,
       expense_date: form.expense_date,
-      date: form.expense_date,
       created_at: now,
     };
 
     if (navigator.onLine) {
-      const { error } = await supabase.from("expenses").insert(payload);
+      const { error } = await supabase.from("expenses").insert(supabasePayload);
       setSaving(false);
       if (error) {
         toast.error(error.message);
@@ -124,9 +123,10 @@ export default function Expenses() {
       const { db } = await import("@/lib/offline/db");
       const { useOfflineQueue } = await import("@/lib/offline/useOfflineQueue");
       const { queueAction } = useOfflineQueue();
-      await db.expenses.put(payload);
-      await queueAction(rid!, "EXPENSE_CREATE", payload);
-      setExpenses(prev => [payload as unknown as Expense, ...prev]);
+      const offlinePayload = { ...supabasePayload, date: form.expense_date };
+      await db.expenses.put(offlinePayload as any);
+      await queueAction(rid!, "EXPENSE_CREATE", supabasePayload);
+      setExpenses(prev => [supabasePayload as unknown as Expense, ...prev]);
       toast.success("Expense saved offline — will sync when connected");
       setModalOpen(false);
       setSaving(false);

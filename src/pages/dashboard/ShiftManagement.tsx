@@ -165,8 +165,8 @@ export default function ShiftManagement() {
   const openForceClose = (shift: any) => {
     const stats = shiftStats[shift.id];
     const expectedCash = (Number(shift.start_cash) || 0) + (stats?.cashSales || 0) - (stats?.cashRefunds || 0);
-    const expectedPos = stats?.posSales || 0;
-    const expectedTransfers = stats?.transferSales || 0;
+    const expectedPos = (Number(shift.start_pos) || 0) + (stats?.posSales || 0);
+    const expectedTransfers = (Number(shift.start_transfers) || 0) + (stats?.transferSales || 0);
     
     setForceClosingShift({ ...shift, expectedCash, expectedPos, expectedTransfers });
     setActualCash(expectedCash.toString());

@@ -150,7 +150,7 @@ const Orders = () => {
       .from("orders")
       .select("status, payment_status")
       .eq("restaurant_id", restaurant.id)
-      .in("status", ["pending", "preparing", "served"]);
+      .in("status", ["pending", "preparing", "served", "completed"]);
 
     if (exportRange !== "all") {
       q = q.gte("created_at", dateFilterRange.from.toISOString());
@@ -162,7 +162,8 @@ const Orders = () => {
 
     const pending = data.filter(o => o.status === "pending").length;
     const pending_transfer = data.filter(o => o.status === "served" && o.payment_status === "unpaid").length;
-    setCounts({ pending, pending_transfer });
+    const completed = data.filter(o => o.status === "completed").length;
+    setCounts({ pending, pending_transfer, completed });
   };
 
   useEffect(() => {
