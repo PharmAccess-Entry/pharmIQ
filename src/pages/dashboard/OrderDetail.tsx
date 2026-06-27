@@ -14,6 +14,8 @@ import { OrderDetailSkeleton } from "@/components/LoadingState";
 import { Receipt } from "@/components/Receipt";
 import html2canvas from "html2canvas";
 import { useRef } from "react";
+import { useOfflineStatus } from "@/lib/useOfflineStatus";
+import { WifiOff } from "lucide-react";
 
 type Order = any;
 type OrderItem = { id: string; name: string; qty: number; price: number; item_intent: string | null; selected_option: string | null; notes: string | null; bundle_id?: string | null };
@@ -35,6 +37,7 @@ export const OrderDetail = () => {
   const { role } = useRestaurant();
   
   const receiptRef = useRef<HTMLDivElement>(null);
+  const isOffline = useOfflineStatus();
 
   const printReceipt = () => {
     if (!receiptRef.current) return;
@@ -63,6 +66,25 @@ export const OrderDetail = () => {
   useEffect(() => {
     if (!id) return;
     const load = async () => {
+      if (!navigator.onLine) {
+        // Basic fallback: just show loading error or what we have in cache
+        try {
+          const { db } = await import("@/lib/offline/db");
+          const cachedOrder = await db.orders.get(id);
+          if (cachedOrder) {
+            setOrder(cachedOrder);
+            const cachedItems = await db.orderItems.where("order_id").equals(id).toArray();
+            setItems(cachedItems as OrderItem[]);
+          } else {
+            setNotFound(true);
+          }
+        } catch (e) {
+          setNotFound(true);
+        }
+        setLoading(false);
+        return;
+      }
+      
       const [{ data: o }, { data: it }] = await Promise.all([
         supabase.from("orders").select("*").eq("id", id).maybeSingle(),
         supabase.from("order_items").select("*").eq("order_id", id),
@@ -114,6 +136,8 @@ export const OrderDetail = () => {
       </DashboardLayout>
     );
   }
+
+  const handleOfflineAction = () => toast.error("Action not available offline");
 
   const advance = async (status: string) => {
     const originalOrder = { ...order };
@@ -313,6 +337,12 @@ export const OrderDetail = () => {
 
   return (
     <DashboardLayout>
+      {isOffline && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm font-medium">
+          <WifiOff className="h-4 w-4 shrink-0" />
+          <span>You're offline — viewing cached order details. Updating order status is disabled.</span>
+        </div>
+      )}
       <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
         <Link to="/dashboard/orders" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-primary"><ArrowLeft className="h-4 w-4" />Back to orders</Link>
         <div className="flex items-center gap-2">
@@ -418,10 +448,10 @@ export const OrderDetail = () => {
             <h3 className="font-display font-semibold mb-3">Processing workflow</h3>
             <div className="space-y-2">
               {order.status === "pending" && (
-                <Button variant="hero" className="w-full h-auto py-3 text-base sm:text-lg whitespace-normal leading-tight" onClick={() => advance("preparing")}>Start Dispensing</Button>
+                <Button variant="hero" className="w-full h-auto py-3 text-base sm:text-lg whitespace-normal leading-tight" onClick={isOffline ? handleOfflineAction : () => advance("preparing")} disabled={isOffline}>Start Dispensing</Button>
               )}
               {order.status === "preparing" && (
-                <Button variant="hero" className="w-full h-12 text-lg bg-blue-600 hover:bg-blue-700" onClick={() => advance("completed")}>Mark as Dispensed</Button>
+                <Button variant="hero" className="w-full h-12 text-lg bg-blue-600 hover:bg-blue-700" onClick={isOffline ? handleOfflineAction : () => advance("completed")} disabled={isOffline}>Mark as Dispensed</Button>
               )}
               {(order.status === "completed" || (order.status === "served" && order.payment_status !== "unpaid")) && (
                 <div className="bg-primary/10 text-primary rounded-xl p-4 text-center">
@@ -442,17 +472,17 @@ export const OrderDetail = () => {
                     <p className="text-xs text-amber-600/80 mt-0.5">Meds dispensed — confirm transfer receipt below</p>
                   </div>
                   {(role === "owner" || role === "manager") ? (
-                    <Button className="w-full h-11 rounded-xl font-bold bg-emerald-600 hover:bg-emerald-700 text-white" onClick={() => setCollectingPayment(true)}>Confirm Payment</Button>
+                    <Button className="w-full h-11 rounded-xl font-bold bg-emerald-600 hover:bg-emerald-700 text-white" onClick={isOffline ? handleOfflineAction : () => setCollectingPayment(true)} disabled={isOffline}>Confirm Payment</Button>
                   ) : (
                     <div className="w-full h-11 flex items-center justify-center rounded-xl font-bold bg-amber-500/20 text-amber-600">Awaiting Cashier</div>
                   )}
                 </div>
               )}
               {order.status !== "cancelled" && order.status !== "refunded" && order.status !== "served" && order.status !== "completed" && (
-                <Button variant="ghost" className="w-full text-destructive mt-4" onClick={() => advance("cancelled")}><X className="h-4 w-4" /> Cancel Order</Button>
+                <Button variant="ghost" className="w-full text-destructive mt-4" onClick={isOffline ? handleOfflineAction : () => advance("cancelled")} disabled={isOffline}><X className="h-4 w-4" /> Cancel Order</Button>
               )}
               {order.status === "served" && (
-                <Button variant="ghost" className="w-full text-destructive mt-4" onClick={() => setRefundingOrder(true)}><AlertTriangle className="h-4 w-4 mr-2" /> Void / Refund Order</Button>
+                <Button variant="ghost" className="w-full text-destructive mt-4" onClick={isOffline ? handleOfflineAction : () => setRefundingOrder(true)} disabled={isOffline}><AlertTriangle className="h-4 w-4 mr-2" /> Void / Refund Order</Button>
               )}
             </div>
           </div>

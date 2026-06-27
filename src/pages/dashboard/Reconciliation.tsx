@@ -8,7 +8,8 @@ import { toast } from "sonner";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ListChecks, AlertTriangle, CheckCircle2, TrendingDown } from "lucide-react";
+import { ListChecks, AlertTriangle, CheckCircle2, TrendingDown, WifiOff } from "lucide-react";
+import { useOfflineStatus } from "@/lib/useOfflineStatus";
 
 export default function Reconciliation() {
   const { restaurant, role } = useRestaurant();
@@ -19,6 +20,7 @@ export default function Reconciliation() {
   const [reconciliations, setReconciliations] = useState<any[]>([]);
   const [activeSession, setActiveSession] = useState<any | null>(null);
   const [viewedReconciliation, setViewedReconciliation] = useState<any | null>(null);
+  const isOffline = useOfflineStatus();
   
   // Data for active session
   const [batches, setBatches] = useState<any[]>([]);
@@ -31,6 +33,10 @@ export default function Reconciliation() {
   }, [rid]);
 
   const fetchReconciliations = async () => {
+    if (!navigator.onLine) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const { data } = await supabase
@@ -227,6 +233,12 @@ export default function Reconciliation() {
       </Helmet>
 
       <div className="max-w-6xl mx-auto space-y-6">
+        {isOffline && (
+          <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm font-medium">
+            <WifiOff className="h-4 w-4 shrink-0" />
+            <span>You're offline — Reconciliation requires an active internet connection.</span>
+          </div>
+        )}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="font-display font-bold text-2xl lg:text-3xl flex items-center gap-2">
@@ -235,7 +247,7 @@ export default function Reconciliation() {
             <p className="text-muted-foreground text-sm mt-1">Audit physical stock levels and track variance losses.</p>
           </div>
           {!activeSession && (
-            <Button onClick={startNewCount} className="gap-2 font-bold whitespace-nowrap">
+            <Button onClick={startNewCount} className="gap-2 font-bold whitespace-nowrap" disabled={isOffline} title={isOffline ? "Online only" : undefined}>
               Start Physical Count
             </Button>
           )}

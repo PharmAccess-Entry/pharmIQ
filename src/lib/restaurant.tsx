@@ -261,11 +261,25 @@ export const RestaurantProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     if (!restaurant?.id) return;
+    
+    const handleOnline = () => refresh();
+    window.addEventListener("online", handleOnline);
+
+    if (!navigator.onLine) {
+      return () => window.removeEventListener("online", handleOnline);
+    }
+
     const ch = supabase
       .channel(`restaurant-info-${restaurant.id}`)
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "restaurants", filter: `id=eq.${restaurant.id}` }, refresh)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "restaurants", filter: `id=eq.${restaurant.id}` }, () => {
+        if (navigator.onLine) refresh();
+      })
       .subscribe();
-    return () => { supabase.removeChannel(ch); };
+      
+    return () => { 
+      supabase.removeChannel(ch); 
+      window.removeEventListener("online", handleOnline);
+    };
   }, [restaurant?.id, refresh]);
 
   return <RestCtx.Provider value={{ restaurant, loading, refresh, role }}>{children}</RestCtx.Provider>;

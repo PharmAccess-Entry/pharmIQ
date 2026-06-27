@@ -10,6 +10,8 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useRestaurant } from "@/lib/restaurant";
 import { DashboardLayout } from "@/components/DashboardLayout";
+import { useOfflineStatus } from "@/lib/useOfflineStatus";
+import { WifiOff } from "lucide-react";
 
 type Supplier = {
   id: string;
@@ -30,23 +32,39 @@ export default function Suppliers() {
   const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const isOffline = useOfflineStatus();
 
   useEffect(() => {
     if (!restaurant?.id) return;
     const fetchSuppliers = async () => {
-      const { data, error } = await supabase
-        .from("suppliers")
-        .select("*")
-        .eq("restaurant_id", restaurant.id)
-        .order("name");
-      if (error) {
-        toast.error("Failed to load suppliers");
+      setLoading(true);
+      if (navigator.onLine) {
+        const { data, error } = await supabase
+          .from("suppliers")
+          .select("*")
+          .eq("restaurant_id", restaurant.id)
+          .order("name");
+        if (error) {
+          toast.error("Failed to load suppliers");
+        } else {
+          const rows = data as Supplier[];
+          setSuppliers(rows);
+          const { db } = await import("@/lib/offline/db");
+          await db.suppliers.where("restaurant_id").equals(restaurant.id).delete();
+          if (rows.length > 0) await db.suppliers.bulkPut(rows as any[]);
+        }
       } else {
-        setSuppliers(data as Supplier[]);
+        const { db } = await import("@/lib/offline/db");
+        const rows = await db.suppliers.where("restaurant_id").equals(restaurant.id).sortBy("name");
+        setSuppliers(rows as any[]);
+        toast.info("Offline mode — showing cached suppliers");
       }
       setLoading(false);
     };
     fetchSuppliers();
+    const handler = () => fetchSuppliers();
+    window.addEventListener("pharmiq_sync_complete", handler);
+    return () => window.removeEventListener("pharmiq_sync_complete", handler);
   }, [restaurant?.id]);
 
   const filteredSuppliers = suppliers.filter(
@@ -73,39 +91,58 @@ export default function Suppliers() {
       name, contact_name, phone, email, address, notes, status
     };
 
+    const { db } = await import("@/lib/offline/db");
+    const { useOfflineQueue } = await import("@/lib/offline/useOfflineQueue");
+    const { queueAction } = useOfflineQueue();
+
     if (selectedSupplier) {
-      const { error } = await supabase
-        .from("suppliers")
-        .update(payload)
-        .eq("id", selectedSupplier.id);
-        
-      if (error) {
-        toast.error("Failed to update supplier: " + error.message);
+      if (navigator.onLine) {
+        const { error } = await supabase
+          .from("suppliers")
+          .update(payload)
+          .eq("id", selectedSupplier.id);
+        if (error) {
+          toast.error("Failed to update supplier: " + error.message);
+          setSaving(false);
+          return;
+        }
       } else {
-        setSuppliers(suppliers.map(s => s.id === selectedSupplier.id ? { ...s, ...payload } : s));
-        toast.success("Supplier updated successfully");
-        setOpenModal(false);
+        await queueAction(restaurant.id, "SUPPLIER_UPDATE", { id: selectedSupplier.id, data: payload });
       }
+      await db.suppliers.update(selectedSupplier.id, payload as any);
+      setSuppliers(suppliers.map(s => s.id === selectedSupplier.id ? { ...s, ...payload } : s));
+      toast.success(navigator.onLine ? "Supplier updated successfully" : "Saved offline — will sync when connected");
+      setOpenModal(false);
     } else {
-      const { data, error } = await supabase
-        .from("suppliers")
-        .insert({
-          ...payload,
-          restaurant_id: restaurant.id,
-        })
-        .select()
-        .single();
-        
-      if (error) {
-        toast.error("Failed to add supplier: " + error.message);
-      } else {
+      const { v4: uuidv4 } = await import("uuid");
+      const newId = uuidv4();
+      const now = new Date().toISOString();
+      const fullPayload = { ...payload, id: newId, restaurant_id: restaurant.id, created_at: now, updated_at: now };
+      if (navigator.onLine) {
+        const { data, error } = await supabase
+          .from("suppliers")
+          .insert(fullPayload)
+          .select()
+          .single();
+        if (error) {
+          toast.error("Failed to add supplier: " + error.message);
+          setSaving(false);
+          return;
+        }
+        await db.suppliers.put(data as any);
         setSuppliers([data as Supplier, ...suppliers]);
         toast.success("Supplier added successfully");
-        setOpenModal(false);
+      } else {
+        await db.suppliers.put(fullPayload as any);
+        await queueAction(restaurant.id, "SUPPLIER_CREATE", fullPayload);
+        setSuppliers([fullPayload as unknown as Supplier, ...suppliers]);
+        toast.success("Supplier saved offline — will sync when connected");
       }
+      setOpenModal(false);
     }
     setSaving(false);
   };
+
 
   const openNew = () => {
     setSelectedSupplier(null);
@@ -120,6 +157,12 @@ export default function Suppliers() {
   return (
     <DashboardLayout>
     <div className="space-y-6">
+      {isOffline && (
+        <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm font-medium">
+          <WifiOff className="h-4 w-4 shrink-0" />
+          <span>You're offline — showing cached suppliers. Changes will be synced when you reconnect.</span>
+        </div>
+      )}
       <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Suppliers</h1>

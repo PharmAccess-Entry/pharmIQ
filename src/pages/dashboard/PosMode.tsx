@@ -25,6 +25,7 @@ import { useOfflinePos } from "@/lib/offline/useOfflinePos";
 import { generateAndSaveOfflineReceipt } from "@/lib/offline/receipt";
 import { validateStockChange } from "@/lib/validations/stock";
 import { useOfflineQueue } from "@/lib/offline/useOfflineQueue";
+import { db } from "@/lib/offline/db";
 import { v4 as uuidv4 } from "uuid";
 
 type MenuItem = {
@@ -97,6 +98,18 @@ export default function PosMode() {
   // Load active shift for THIS user only
   const loadActiveShift = useCallback(async () => {
     if (!restaurant?.id || !user?.id) return;
+
+    if (!navigator.onLine) {
+      // Offline: read from Dexie local cache
+      const localShift = await db.shifts
+        .where('restaurant_id').equals(restaurant.id)
+        .filter(s => s.user_id === user.id && s.status === 'active')
+        .first();
+      setActiveShift(localShift ?? null);
+      if (!localShift) setShiftModalOpen(true);
+      return;
+    }
+
     const { data } = await supabase
       .from("shifts")
       .select("id, start_cash, start_time")
@@ -107,6 +120,21 @@ export default function PosMode() {
       .limit(1)
       .maybeSingle();
     setActiveShift(data ?? null);
+
+    // Persist to Dexie so it's available when offline
+    if (data) {
+      const now = new Date().toISOString();
+      await db.shifts.put({
+        id: data.id,
+        restaurant_id: restaurant.id,
+        user_id: user.id,
+        status: 'active',
+        start_time: data.start_time,
+        start_cash: data.start_cash,
+        created_at: now,
+        updated_at: now,
+      });
+    }
     
     // Always prefetch the last closed shift for handover assistance
     if (!data) {
@@ -147,6 +175,9 @@ export default function PosMode() {
 
     try {
       if (isOffline) {
+        // Persist shift to Dexie immediately so loadActiveShift can find it offline
+        const now = new Date().toISOString();
+        await db.shifts.put({ ...payload, created_at: now, updated_at: now });
         await queueAction(restaurant.id, "SHIFT_CREATE", payload);
         setActiveShift(payload);
         setShiftModalOpen(false);
@@ -163,6 +194,9 @@ export default function PosMode() {
         .select("id, start_cash, start_time")
         .single();
       if (error) throw error;
+      // Persist to Dexie for offline resilience
+      const now = new Date().toISOString();
+      await db.shifts.put({ ...payload, id: data.id, created_at: now, updated_at: now });
       setActiveShift(data);
       setShiftModalOpen(false);
       setStartCashStr("");
@@ -308,7 +342,7 @@ export default function PosMode() {
   }, [menuItems]);
 
   const loadPendingTransfers = useCallback(async () => {
-    if (!restaurant?.id) return;
+    if (!restaurant?.id || !navigator.onLine) return;
     const { data, error } = await supabase
       .from("orders")
       .select("id, short_code, total, customer_name, intent, created_at, order_items(name, qty, item_intent)")
@@ -578,6 +612,10 @@ export default function PosMode() {
 
   // Confirm transfer payment for a parked order
   const confirmTransfer = async (pt: PendingTransfer) => {
+    if (!navigator.onLine) {
+      toast.error("Cannot confirm transfers while offline. Please connect to the internet.");
+      return;
+    }
     setConfirmingTransfer(pt);
     const { error } = await supabase.from("orders").update({ 
       status: "completed",

@@ -14,6 +14,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { OrderRowSkeleton } from "@/components/LoadingState";
 import { CustomDatePicker } from "@/components/ui/custom-date-picker";
+import { useOfflineStatus } from "@/lib/useOfflineStatus";
+import { WifiOff } from "lucide-react";
 
 type Order = {
   id: string;
@@ -51,6 +53,7 @@ const Orders = () => {
   const [initialLoad, setInitialLoad] = useState(true);
   const [counts, setCounts] = useState<Record<string, number>>({ pending: 0, preparing: 0, served: 0 });
   const loaderRef = useRef<HTMLDivElement>(null);
+  const isOffline = useOfflineStatus();
 
   const dateFilterRange = useMemo(() => {
     const now = new Date();
@@ -73,6 +76,33 @@ const Orders = () => {
 
   const fetchOrders = async (pageNum: number, currentOrders: Order[], isRefresh = false) => {
     if (!restaurant?.id) return;
+    if (!navigator.onLine) {
+      // Offline: load from Dexie db.sales
+      try {
+        const { db } = await import("@/lib/offline/db");
+        let rows = await db.sales
+          .where('restaurant_id').equals(restaurant.id)
+          .reverse()
+          .sortBy('created_at');
+
+        // Filter by tab
+        if (tab === 'completed') {
+          rows = rows.filter(o => ['completed', 'cancelled', 'refunded'].includes(o.status));
+        } else if (tab === 'pending_transfer') {
+          rows = rows.filter(o => o.status === 'served' && o.payment_status === 'unpaid');
+        } else {
+          rows = rows.filter(o => o.status === tab);
+        }
+
+        setOrders(rows as any[]);
+      } catch (e) {
+        console.error('Offline order load failed:', e);
+      }
+      setIsLoading(false);
+      setInitialLoad(false);
+      return;
+    }
+
     if (!isRefresh) setIsLoading(true);
     
     let q = supabase
@@ -112,7 +142,7 @@ const Orders = () => {
   };
 
   const fetchCounts = async () => {
-    if (!restaurant?.id) return;
+    if (!restaurant?.id || !navigator.onLine) return;
     // Single query: fetch all non-terminal orders and count them client-side.
     // This replaces 3 separate HEAD requests with 1, which matters when
     // the real-time listener fires fetchCounts() on every order change.
@@ -144,9 +174,21 @@ const Orders = () => {
   useEffect(() => {
     const rid = restaurant?.id;
     if (!rid) return;
+    
+    const handleOnline = () => {
+      fetchOrders(0, []);
+      fetchCounts();
+    };
+    window.addEventListener("online", handleOnline);
+
+    if (!navigator.onLine) {
+      return () => window.removeEventListener("online", handleOnline);
+    }
+
     const ch = supabase
       .channel(`orders-list-${rid}`)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "orders", filter: `restaurant_id=eq.${rid}` }, async (payload) => {
+        if (!navigator.onLine) return;
         const newId = payload.new.id;
         const { data } = await supabase.from("orders").select("id, short_code, table_number, intent, status, total, created_at, payment_status, customer_name, order_items(name, qty, price, item_intent)").eq("id", newId).single();
         if (data) {
@@ -158,6 +200,7 @@ const Orders = () => {
         }
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders", filter: `restaurant_id=eq.${rid}` }, (payload) => {
+        if (!navigator.onLine) return;
         const updated = payload.new as any;
         const old = payload.old as any;
         setOrders((prev) => prev.map(o => o.id === updated.id ? { ...o, ...updated } : o));
@@ -169,7 +212,11 @@ const Orders = () => {
         }
       })
       .subscribe();
-    return () => { supabase.removeChannel(ch); };
+      
+    return () => { 
+      supabase.removeChannel(ch); 
+      window.removeEventListener("online", handleOnline);
+    };
   }, [restaurant?.id]);
 
   useEffect(() => {
@@ -213,6 +260,10 @@ const Orders = () => {
   };
 
   const collectPaymentAndServe = async (orderId: string, method: "cash_paid" | "pos_paid" | "confirmed") => {
+    if (!navigator.onLine) {
+      toast.error("Cannot confirm payments while offline. Please connect to the internet.");
+      return;
+    }
     // Save original state for rollback
     const originalOrder = orders.find(o => o.id === orderId);
     
@@ -292,6 +343,12 @@ const Orders = () => {
 
   return (
     <DashboardLayout>
+      {isOffline && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm font-medium">
+          <WifiOff className="h-4 w-4 shrink-0" />
+          <span>You're offline — showing orders placed on this device. Sync will resume when reconnected.</span>
+        </div>
+      )}
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="font-display text-3xl font-bold">Orders</h1>

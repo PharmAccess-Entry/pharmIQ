@@ -6,11 +6,14 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { RealTimeAgo } from "@/components/RealTimeAgo";
 import { NotificationRowSkeleton } from "@/components/LoadingState";
+import { useOfflineStatus } from "@/lib/useOfflineStatus";
+import { WifiOff } from "lucide-react";
 
 const Notifications = () => {
   const { items, loading, unreadCount, markAllRead, markRead, hasMore, fetchMore } = useNotifications();
   const [filter, setFilter] = useState<"all" | "unread">("all");
   const list = useMemo(() => (filter === "unread" ? items.filter((n) => !n.read) : items), [items, filter]);
+  const isOffline = useOfflineStatus();
   const loaderRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -24,6 +27,12 @@ const Notifications = () => {
 
   return (
     <DashboardLayout>
+      {isOffline && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm font-medium">
+          <WifiOff className="h-4 w-4 shrink-0" />
+          <span>You're offline — showing cached notifications. New notifications will load when connected.</span>
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="font-display text-3xl font-bold flex items-center gap-2"><Bell className="h-7 w-7 text-primary" />Notifications</h1>

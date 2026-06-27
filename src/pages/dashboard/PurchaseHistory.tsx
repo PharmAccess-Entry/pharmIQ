@@ -12,7 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CustomDatePicker } from "@/components/ui/custom-date-picker";
 import { CurrencyInput } from "@/components/ui/currency-input";
-import { PackageOpen, Plus, Search, ArrowRight, Truck } from "lucide-react";
+import { PackageOpen, Plus, Search, ArrowRight, Truck, WifiOff } from "lucide-react";
+
 
 export default function PurchaseHistory() {
   const { restaurant, role } = useRestaurant();
@@ -38,9 +39,20 @@ export default function PurchaseHistory() {
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [menuItems, setMenuItems] = useState<any[]>([]);
 
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
   useEffect(() => {
     if (!rid) return;
     fetchData();
+
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
   }, [rid]);
 
   const fetchData = async () => {
@@ -185,10 +197,22 @@ export default function PurchaseHistory() {
             </h1>
             <p className="text-muted-foreground text-sm mt-1">Track incoming stock batches and supplier invoices.</p>
           </div>
-          <Button onClick={() => setReceiveModalOpen(true)} className="gap-2 font-bold whitespace-nowrap">
+          <Button 
+            onClick={() => setReceiveModalOpen(true)} 
+            className="gap-2 font-bold whitespace-nowrap"
+            disabled={!isOnline}
+            title={!isOnline ? "Must be online to receive stock" : undefined}
+          >
             <Plus className="h-4 w-4" /> Receive Stock
           </Button>
         </div>
+
+        {!isOnline && (
+          <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm font-medium">
+            <WifiOff className="h-4 w-4 shrink-0" />
+            <span>You're offline — Purchase history requires an active internet connection to load.</span>
+          </div>
+        )}
 
         <div className="relative w-full max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />

@@ -16,6 +16,8 @@ import { DateRange } from "react-day-picker";
 import { cn } from "@/lib/utils";
 import { StatCardSkeleton, ChartSkeleton } from "@/components/LoadingState";
 import { Badge } from "@/components/ui/badge";
+import { useOfflineStatus } from "@/lib/useOfflineStatus";
+import { WifiOff } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -23,6 +25,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 export default function Analytics() {
   const { restaurant } = useRestaurant();
   const rid = restaurant?.id;
+  const isOffline = useOfflineStatus();
 
   const [date, setDate] = useState<DateRange | undefined>({
     from: subDays(new Date(), 30),
@@ -88,6 +91,41 @@ export default function Analytics() {
     if (!rid || !date?.from) return;
 
     const fetchAnalytics = async () => {
+      if (!navigator.onLine) {
+        // Offline: load from Dexie, filtered by the selected date range
+        setLoading(true);
+        try {
+          const { db } = await import("@/lib/offline/db");
+          const toDate = date.to || date.from;
+          const fromISO = startOfDay(date.from).toISOString();
+          const toISO = endOfDay(toDate).toISOString();
+          const fromDateStr = startOfDay(date.from).toISOString().split('T')[0];
+          const toDateStr = endOfDay(toDate).toISOString().split('T')[0];
+
+          // Sales filtered by date range
+          const localSales = await db.sales
+            .where('restaurant_id').equals(rid)
+            .filter(s => s.created_at >= fromISO && s.created_at <= toISO)
+            .toArray();
+          setOrders(localSales);
+
+          // Cost map from Dexie products (cost_price not stored in OfflineProduct schema, use 0)
+          setCostMap(new Map());
+
+          // Expenses filtered by date range
+          const localExpenses = await db.expenses
+            .where('restaurant_id').equals(rid)
+            .filter(e => e.date >= fromDateStr && e.date <= toDateStr)
+            .toArray();
+          const expTotal = localExpenses.reduce((sum, e) => sum + Number(e.amount), 0);
+          setTotalExpenses(expTotal);
+        } catch (err) {
+          console.error('[Analytics] Offline load error:', err);
+        } finally {
+          setLoading(false);
+        }
+        return;
+      }
       setLoading(true);
       try {
         const toDate = date.to || date.from; // Default to 'from' date if 'to' is missing
@@ -124,7 +162,9 @@ export default function Analytics() {
       }
     };
 
+
     const fetchStaffAndShifts = async () => {
+      if (!navigator.onLine) return;
       // Fetch Staff Profiles
       const { data: roles } = await supabase.from("user_roles").select("*").eq("restaurant_id", rid);
       let allStaff: any[] = [];
@@ -371,6 +411,12 @@ export default function Analytics() {
 
   return (
     <DashboardLayout>
+      {isOffline && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm font-medium">
+          <WifiOff className="h-4 w-4 shrink-0" />
+          <span>You're offline — Analytics requires an active internet connection to load new data.</span>
+        </div>
+      )}
       <div className="flex flex-col gap-4 mb-8">
         <div>
           <h1 className="font-display text-3xl font-bold">Analytics & Reports</h1>

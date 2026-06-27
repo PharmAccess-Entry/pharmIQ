@@ -7,12 +7,14 @@ import { PrintBarcodeLabels, BarcodeLabelProps } from "@/components/reports/Barc
 import { supabase } from "@/integrations/supabase/client";
 import { useRestaurant } from "@/lib/restaurant";
 import { format } from "date-fns";
-import { FileText, Tags, Printer } from "lucide-react";
+import { FileText, Tags, Printer, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useOfflineStatus } from "@/lib/useOfflineStatus";
 
 export default function Reports() {
   const { restaurant } = useRestaurant();
   const [activeTab, setActiveTab] = useState("stock_count");
+  const isOffline = useOfflineStatus();
   
   // Data states
   const [inventoryData, setInventoryData] = useState<any[]>([]);
@@ -22,14 +24,20 @@ export default function Reports() {
     
     // Fetch inventory for Stock Count Sheet and Valuation
     const fetchInventory = async () => {
-      const { data } = await supabase
-        .from("menu_items")
-        .select("id, name, barcode, category, price, stock_quantity, track_inventory")
-        .eq("restaurant_id", restaurant.id)
-        .eq("track_inventory", true)
-        .order("name");
-      
-      setInventoryData(data || []);
+      if (navigator.onLine) {
+        const { data } = await supabase
+          .from("menu_items")
+          .select("id, name, barcode, category, price, stock_quantity, track_inventory")
+          .eq("restaurant_id", restaurant.id)
+          .eq("track_inventory", true)
+          .order("name");
+        
+        setInventoryData(data || []);
+      } else {
+        const { db } = await import("@/lib/offline/db");
+        const rows = await db.products.where("restaurant_id").equals(restaurant.id).filter(r => !!r.track_inventory).sortBy("name");
+        setInventoryData(rows as any[]);
+      }
     };
     
     fetchInventory();
@@ -72,6 +80,12 @@ export default function Reports() {
   return (
     <DashboardLayout>
       <div className="max-w-6xl mx-auto space-y-6 print:m-0 print:p-0">
+        {isOffline && (
+          <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm font-medium no-print">
+            <WifiOff className="h-4 w-4 shrink-0" />
+            <span>You're offline — viewing cached reports.</span>
+          </div>
+        )}
         <div className="no-print">
           <h1 className="text-2xl font-bold tracking-tight">Reports & Documents</h1>
           <p className="text-muted-foreground">Generate, print, and export system reports.</p>

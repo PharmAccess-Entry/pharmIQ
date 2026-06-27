@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { format } from "date-fns";
+import { useOfflineStatus } from "@/lib/useOfflineStatus";
+import { WifiOff } from "lucide-react";
 
 export default function ShiftManagement() {
   const { restaurant, role } = useRestaurant();
@@ -39,58 +41,89 @@ export default function ShiftManagement() {
   const [actualTransfers, setActualTransfers] = useState<string>("");
   const [forceCloseNotes, setForceCloseNotes] = useState<string>("");
   const [forceCloseLoading, setForceCloseLoading] = useState(false);
+  const isOffline = useOfflineStatus();
 
   const fetchShifts = useCallback(async () => {
     if (!rid) return;
     setLoading(true);
     try {
-      const { data } = await supabase
-        .from("shifts")
-        .select("*")
-        .eq("restaurant_id", rid)
-        .order("start_time", { ascending: false })
-        .limit(50);
+      if (navigator.onLine) {
+        const { data } = await supabase
+          .from("shifts")
+          .select("*")
+          .eq("restaurant_id", rid)
+          .order("start_time", { ascending: false })
+          .limit(50);
 
-      if (data) {
-        setShifts(data);
+        if (data) {
+          setShifts(data);
 
-        // Fetch order stats per shift — shift_id scoped, no time windows
-        const stats: Record<string, any> = {};
-        await Promise.all(
-          data.map(async (shift) => {
-            const { data: orders } = await supabase
-              .from("orders")
-              .select("total, payment_status, status")
-              .eq("shift_id", shift.id);
+          // Snapshot into Dexie for offline use
+          const { db } = await import("@/lib/offline/db");
+          await db.shifts.where("restaurant_id").equals(rid).delete();
+          if (data.length > 0) await db.shifts.bulkPut(data as any[]);
 
-            if (orders) {
-              const paid = orders.filter(o => o.status !== "refunded" && o.status !== "cancelled" && o.payment_status !== "unpaid");
-              const refunded = orders.filter(o => o.status === "refunded" && o.payment_status === "cash_paid");
-              stats[shift.id] = {
-                sales: paid.reduce((s, o) => s + (Number(o.total) || 0), 0),
-                cashSales: paid.filter(o => o.payment_status === "cash_paid").reduce((s, o) => s + (Number(o.total) || 0), 0),
-                posSales: paid.filter(o => ["pos_paid", "cash_pos"].includes(o.payment_status)).reduce((s, o) => s + (Number(o.total) || 0), 0),
-                transferSales: paid.filter(o => o.payment_status === "confirmed").reduce((s, o) => s + (Number(o.total) || 0), 0),
-                cashRefunds: refunded.reduce((s, o) => s + (Number(o.total) || 0), 0),
-                orderCount: orders.length,
-              };
+          // Fetch order stats per shift
+          const stats: Record<string, any> = {};
+          await Promise.all(
+            data.map(async (shift) => {
+              const { data: orders } = await supabase
+                .from("orders")
+                .select("total, payment_status, status")
+                .eq("shift_id", shift.id);
+
+              if (orders) {
+                const paid = orders.filter(o => o.status !== "refunded" && o.status !== "cancelled" && o.payment_status !== "unpaid");
+                const refunded = orders.filter(o => o.status === "refunded" && o.payment_status === "cash_paid");
+                stats[shift.id] = {
+                  sales: paid.reduce((s, o) => s + (Number(o.total) || 0), 0),
+                  cashSales: paid.filter(o => o.payment_status === "cash_paid").reduce((s, o) => s + (Number(o.total) || 0), 0),
+                  posSales: paid.filter(o => ["pos_paid", "cash_pos"].includes(o.payment_status)).reduce((s, o) => s + (Number(o.total) || 0), 0),
+                  transferSales: paid.filter(o => o.payment_status === "confirmed").reduce((s, o) => s + (Number(o.total) || 0), 0),
+                  cashRefunds: refunded.reduce((s, o) => s + (Number(o.total) || 0), 0),
+                  orderCount: orders.length,
+                };
+              }
+            })
+          );
+          setShiftStats(stats);
+
+          // Fetch staff profiles
+          const userIds = [...new Set(data.map((s) => s.user_id))];
+          if (userIds.length > 0) {
+            const { data: profiles } = await supabase.rpc("get_users_by_ids", { user_ids: userIds });
+            if (profiles) {
+              const nameMap: Record<string, string> = {};
+              profiles.forEach((p: any) => {
+                nameMap[p.id] = p.full_name || p.email || "Unknown";
+              });
+              setStaffNames(nameMap);
             }
-          })
-        );
-        setShiftStats(stats);
-
-        // Fetch staff profiles
-        const userIds = [...new Set(data.map((s) => s.user_id))];
-        if (userIds.length > 0) {
-          const { data: profiles } = await supabase.rpc("get_users_by_ids", { user_ids: userIds });
-          if (profiles) {
-            const nameMap: Record<string, string> = {};
-            profiles.forEach((p: any) => {
-              nameMap[p.id] = p.full_name || p.email || "Unknown";
-            });
-            setStaffNames(nameMap);
           }
         }
+      } else {
+        // Offline: load from Dexie
+        const { db } = await import("@/lib/offline/db");
+        const rows = await db.shifts.where("restaurant_id").equals(rid).reverse().sortBy("start_time");
+        setShifts(rows as any[]);
+
+        // Compute shift stats from local sales (same structure as online)
+        const allLocalSales = await db.sales.where("restaurant_id").equals(rid).toArray();
+        const offlineStats: Record<string, any> = {};
+        for (const shift of rows) {
+          const shiftSales = allLocalSales.filter(s => s.shift_id === shift.id);
+          const paid = shiftSales.filter(s => s.status !== "refunded" && s.status !== "cancelled" && s.payment_status !== "unpaid");
+          const refunded = shiftSales.filter(s => s.status === "refunded" && s.payment_status === "cash_paid");
+          offlineStats[shift.id] = {
+            sales: paid.reduce((s, o) => s + (Number(o.total) || 0), 0),
+            cashSales: paid.filter(o => o.payment_status === "cash_paid").reduce((s, o) => s + (Number(o.total) || 0), 0),
+            posSales: paid.filter(o => ["pos_paid","cash_pos"].includes(o.payment_status)).reduce((s, o) => s + (Number(o.total) || 0), 0),
+            transferSales: paid.filter(o => o.payment_status === "confirmed").reduce((s, o) => s + (Number(o.total) || 0), 0),
+            cashRefunds: refunded.reduce((s, o) => s + (Number(o.total) || 0), 0),
+            orderCount: shiftSales.length,
+          };
+        }
+        setShiftStats(offlineStats);
       }
     } catch (e) {
       console.error("Failed to load shifts", e);
@@ -99,7 +132,12 @@ export default function ShiftManagement() {
     }
   }, [rid]);
 
-  useEffect(() => { fetchShifts(); }, [fetchShifts]);
+  useEffect(() => {
+    fetchShifts();
+    const handler = () => fetchShifts();
+    window.addEventListener("pharmiq_sync_complete", handler);
+    return () => window.removeEventListener("pharmiq_sync_complete", handler);
+  }, [fetchShifts]);
 
   const handleSettle = async () => {
     if (!settlingShift) return;
@@ -190,6 +228,12 @@ export default function ShiftManagement() {
       </Helmet>
 
       <div className="max-w-6xl mx-auto space-y-8">
+        {isOffline && (
+          <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm font-medium">
+            <WifiOff className="h-4 w-4 shrink-0" />
+            <span>You're offline — showing cached shifts. New shifts will be synced when you reconnect.</span>
+          </div>
+        )}
         {/* Header */}
         <div>
           <h1 className="font-display font-bold text-2xl lg:text-3xl flex items-center gap-2">

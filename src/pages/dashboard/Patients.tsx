@@ -8,6 +8,8 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useRestaurant } from "@/lib/restaurant";
 import { DashboardLayout } from "@/components/DashboardLayout";
+import { useOfflineStatus } from "@/lib/useOfflineStatus";
+import { WifiOff } from "lucide-react";
 
 type Patient = {
   id: string;
@@ -24,25 +26,44 @@ export default function Patients() {
   const [search, setSearch] = useState("");
   const [openModal, setOpenModal] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+  const isOffline = useOfflineStatus();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!restaurant?.id) return;
     const fetchPatients = async () => {
-      const { data, error } = await supabase
-        .from("patients")
-        .select("*")
-        .eq("restaurant_id", restaurant.id)
-        .order("name");
-      if (error) {
-        toast.error("Failed to load patients");
+      setLoading(true);
+      if (navigator.onLine) {
+        const { data, error } = await supabase
+          .from("patients")
+          .select("*")
+          .eq("restaurant_id", restaurant.id)
+          .order("name");
+        if (error) {
+          toast.error("Failed to load patients");
+        } else {
+          const rows = data as Patient[];
+          setPatients(rows);
+          // Snapshot into Dexie for offline use
+          const { db } = await import("@/lib/offline/db");
+          await db.patients.where("restaurant_id").equals(restaurant.id).delete();
+          if (rows.length > 0) await db.patients.bulkPut(rows as any[]);
+        }
       } else {
-        setPatients(data as Patient[]);
+        // Load from Dexie
+        const { db } = await import("@/lib/offline/db");
+        const rows = await db.patients.where("restaurant_id").equals(restaurant.id).sortBy("name");
+        setPatients(rows as any[]);
+        toast.info("Offline mode — showing cached patients");
       }
       setLoading(false);
     };
     fetchPatients();
+    // Reload when sync completes
+    const handler = () => fetchPatients();
+    window.addEventListener("pharmiq_sync_complete", handler);
+    return () => window.removeEventListener("pharmiq_sync_complete", handler);
   }, [restaurant?.id]);
 
   const filteredPatients = patients.filter(
@@ -63,39 +84,65 @@ export default function Patients() {
     const allergies = allergiesStr.split(",").map(s => s.trim()).filter(Boolean);
     const chronic_conditions = conditionsStr.split(",").map(s => s.trim()).filter(Boolean);
 
+    const { db } = await import("@/lib/offline/db");
+    const { useOfflineQueue } = await import("@/lib/offline/useOfflineQueue");
+    const { queueAction } = useOfflineQueue();
+
     if (selectedPatient) {
-      const { error } = await supabase
-        .from("patients")
-        .update({ name, phone, allergies, chronic_conditions })
-        .eq("id", selectedPatient.id);
-        
-      if (error) {
-        toast.error("Failed to update patient");
+      const updatedData = { name, phone, allergies, chronic_conditions };
+      if (navigator.onLine) {
+        const { error } = await supabase
+          .from("patients")
+          .update(updatedData)
+          .eq("id", selectedPatient.id);
+        if (error) {
+          toast.error("Failed to update patient");
+          setSaving(false);
+          return;
+        }
       } else {
-        setPatients(patients.map(p => p.id === selectedPatient.id ? { ...p, name, phone, allergies, chronic_conditions } : p));
-        toast.success("Patient updated successfully");
-        setOpenModal(false);
+        await queueAction(restaurant.id, "PATIENT_UPDATE", { id: selectedPatient.id, data: updatedData });
       }
+      // Update Dexie and local state
+      await db.patients.update(selectedPatient.id, updatedData as any);
+      setPatients(patients.map(p => p.id === selectedPatient.id ? { ...p, ...updatedData } : p));
+      toast.success(navigator.onLine ? "Patient updated successfully" : "Saved offline — will sync when connected");
+      setOpenModal(false);
     } else {
-      const { data, error } = await supabase
-        .from("patients")
-        .insert({
-          restaurant_id: restaurant.id,
-          name,
-          phone,
-          allergies,
-          chronic_conditions
-        })
-        .select()
-        .single();
-        
-      if (error) {
-        toast.error("Failed to add patient");
-      } else {
+      const { v4: uuidv4 } = await import("uuid");
+      const newId = uuidv4();
+      const now = new Date().toISOString();
+      const payload = {
+        id: newId,
+        restaurant_id: restaurant.id,
+        name,
+        phone,
+        allergies,
+        chronic_conditions,
+        created_at: now,
+        updated_at: now,
+      };
+      if (navigator.onLine) {
+        const { data, error } = await supabase
+          .from("patients")
+          .insert(payload)
+          .select()
+          .single();
+        if (error) {
+          toast.error("Failed to add patient");
+          setSaving(false);
+          return;
+        }
+        await db.patients.put(data as any);
         setPatients([data as Patient, ...patients]);
         toast.success("Patient added successfully");
-        setOpenModal(false);
+      } else {
+        await db.patients.put(payload as any);
+        await queueAction(restaurant.id, "PATIENT_CREATE", payload);
+        setPatients([payload as unknown as Patient, ...patients]);
+        toast.success("Patient saved offline — will sync when connected");
       }
+      setOpenModal(false);
     }
     setSaving(false);
   };
@@ -112,13 +159,19 @@ export default function Patients() {
 
   return (
     <DashboardLayout>
+      {isOffline && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm font-medium">
+          <WifiOff className="h-4 w-4 shrink-0" />
+          <span>You're offline — showing cached patients. Adding or editing patients is disabled until you reconnect.</span>
+        </div>
+      )}
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Patient Directory</h1>
           <p className="text-muted-foreground text-sm mt-1">Manage patient profiles, allergies, and history.</p>
         </div>
-        <Button onClick={openNew} className="rounded-full shrink-0 shadow-glow">
+        <Button onClick={openNew} className="rounded-full shrink-0 shadow-glow" disabled={isOffline} title={isOffline ? "Online only" : undefined}>
           <Plus className="w-4 h-4 mr-2" /> Add Patient
         </Button>
       </div>

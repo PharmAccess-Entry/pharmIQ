@@ -6,7 +6,8 @@ import { format } from "date-fns";
 import { ShieldAlert, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowUp, ArrowDown } from "lucide-react";
+import { ArrowUp, ArrowDown, WifiOff } from "lucide-react";
+import { useOfflineStatus } from "@/lib/useOfflineStatus";
 
 type AuditLog = {
   id: string;
@@ -24,9 +25,14 @@ export default function AuditLogs() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [inventoryLogs, setInventoryLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const isOffline = useOfflineStatus();
 
   const fetchLogs = async () => {
     if (!restaurant?.id) return;
+    if (!navigator.onLine) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const { data: auditData, error } = await supabase
@@ -98,6 +104,12 @@ export default function AuditLogs() {
 
   return (
     <DashboardLayout>
+      {isOffline && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm font-medium">
+          <WifiOff className="h-4 w-4 shrink-0" />
+          <span>You're offline — Audit logs cannot be loaded without an active connection.</span>
+        </div>
+      )}
       <div className="mb-6 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
@@ -105,7 +117,7 @@ export default function AuditLogs() {
           </h1>
           <p className="text-muted-foreground text-sm mt-1">System-wide tracking of critical actions.</p>
         </div>
-        <Button onClick={fetchLogs} variant="outline" className="bg-card">
+        <Button onClick={fetchLogs} variant="outline" className="bg-card" disabled={isOffline} title={isOffline ? "Online only" : undefined}>
           <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} /> Refresh
         </Button>
       </div>

@@ -23,6 +23,8 @@ import imageCompression from "browser-image-compression";
 import { MenuCardSkeleton, CategoryBubbleSkeleton } from "@/components/LoadingState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MenuImportModal } from "@/components/MenuImportModal";
+import { useOfflineStatus } from "@/lib/useOfflineStatus";
+import { WifiOff } from "lucide-react";
 
 type MenuItem = {
   id: string;
@@ -97,6 +99,7 @@ const MenuManagement = () => {
   const isPharmacy = restaurant?.business_type === "pharmacy";
   const [items, setItems] = useState<MenuItem[]>([]);
   const [categories, setCategories] = useState<string[]>(defaultCategories);
+  const isOffline = useOfflineStatus();
   const [newCat, setNewCat] = useState("");
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -138,8 +141,22 @@ const MenuManagement = () => {
 
   const loadMenu = useCallback(async () => {
     if (!rid) return;
-    const { data } = await supabase.from("menu_items").select("*").eq("restaurant_id", rid).order("category");
-    const list = (data as MenuItem[]) || [];
+    let list: MenuItem[] = [];
+    if (navigator.onLine) {
+      const { data } = await supabase.from("menu_items").select("*").eq("restaurant_id", rid).order("category");
+      list = (data as MenuItem[]) || [];
+      
+      // Snapshot to Dexie
+      if (list.length > 0) {
+        import("@/lib/offline/db").then(({ db }) => {
+          db.products.bulkPut(list.map(r => ({ ...r, restaurant_id: rid, last_synced_at: Date.now() })) as any[]);
+        });
+      }
+    } else {
+      // Offline mode
+      const { db } = await import("@/lib/offline/db");
+      list = (await db.products.where("restaurant_id").equals(rid).toArray()) as unknown as MenuItem[];
+    }
     setItems(list);
     
     const legacyCategories = ["Local Dishes", "Swallow", "Soup", "Proteins", "Pastries", "Drinks", "Intercontinental", "Soups & Swallows", "Small Chops"];
@@ -175,11 +192,19 @@ const MenuManagement = () => {
       return;
     }
     loadMenu();
-    const ch = supabase
-      .channel(`menu-mgmt-${rid}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "menu_items", filter: `restaurant_id=eq.${rid}` }, loadMenu)
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
+    let ch: any;
+    if (navigator.onLine) {
+      ch = supabase
+        .channel(`menu-mgmt-${rid}`)
+        .on("postgres_changes", { event: "*", schema: "public", table: "menu_items", filter: `restaurant_id=eq.${rid}` }, loadMenu)
+        .subscribe();
+    }
+    const handler = () => loadMenu();
+    window.addEventListener("pharmiq_sync_complete", handler);
+    return () => { 
+      if (ch) supabase.removeChannel(ch); 
+      window.removeEventListener("pharmiq_sync_complete", handler);
+    };
   }, [rid, loadMenu, restaurantLoading]);
 
   const itemsByCat = useMemo(() => {
@@ -584,17 +609,24 @@ const MenuManagement = () => {
           <p className="text-muted-foreground mt-1 text-sm">{items.length} {isPharmacy ? "products" : "items"} across {categories.length} categories</p>
         </div>
         <div className="flex items-center gap-1.5 sm:gap-2">
-          <Button size="sm" variant="outline" onClick={() => openSuggestions("All Categories")} className="whitespace-nowrap px-2 sm:px-3 text-xs">
+          <Button size="sm" variant="outline" onClick={() => openSuggestions("All Categories")} className="whitespace-nowrap px-2 sm:px-3 text-xs" disabled={isOffline} title={isOffline ? "Online only" : undefined}>
             <Sparkles className="h-3.5 w-3.5 mr-1" />Browse
           </Button>
-          <Button size="sm" variant="outline" onClick={() => setImportModalOpen(true)} className="whitespace-nowrap px-2 sm:px-3 text-xs">
+          <Button size="sm" variant="outline" onClick={() => setImportModalOpen(true)} className="whitespace-nowrap px-2 sm:px-3 text-xs" disabled={isOffline} title={isOffline ? "Online only" : undefined}>
             <Upload className="h-3.5 w-3.5 mr-1" />Import
           </Button>
-          <Button size="sm" variant="hero" onClick={() => openAdd()} className="whitespace-nowrap px-2 sm:px-3 text-xs">
+          <Button size="sm" variant="hero" onClick={() => openAdd()} className="whitespace-nowrap px-2 sm:px-3 text-xs" disabled={isOffline} title={isOffline ? "Online only" : undefined}>
             <Plus className="h-3.5 w-3.5 mr-1" />Add {isPharmacy ? "product" : "item"}
           </Button>
         </div>
       </div>
+
+      {isOffline && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm font-medium">
+          <WifiOff className="h-4 w-4 shrink-0" />
+          <span>You're offline — showing cached product data. Editing is disabled until you reconnect.</span>
+        </div>
+      )}
 
       {initialLoad ? (
         <div className="space-y-8">

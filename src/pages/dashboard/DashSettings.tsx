@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRestaurant, initialsFromName, trialDaysLeft } from "@/lib/restaurant";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Loader2, Upload, Lock, Users, Trash2, Plus, X, Copy, Link2, Share2, MessageCircle, CreditCard, Building2 } from "lucide-react";
+import { Loader2, Upload, Lock, Users, Trash2, Plus, X, Copy, Link2, Share2, MessageCircle, CreditCard, Building2, WifiOff } from "lucide-react";
 import { Link } from "react-router-dom";
 import { formatNaira } from "@/lib/format";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -18,6 +18,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { usePushPermission } from "@/lib/usePushPermission";
 import imageCompression from "browser-image-compression";
 import { useAuth } from "@/lib/auth";
+import { useOfflineStatus } from "@/lib/useOfflineStatus";
 
 // Pharmacy flat pricing
 const MONTHLY_PRICE = 5000;
@@ -32,6 +33,7 @@ const DashSettings = () => {
   const [resetOpen, setResetOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const isOffline = useOfflineStatus();
 
   // Staff management
   const [staff, setStaff] = useState<any[]>([]);
@@ -69,7 +71,7 @@ const DashSettings = () => {
   const set = (k: keyof typeof form, v: any) => setForm((p) => ({ ...p, [k]: v }));
 
   const loadStaff = async () => {
-    if (!restaurant?.id) return;
+    if (!restaurant?.id || !navigator.onLine) return;
     setLoadingStaff(true);
     const { data: roles, error: rolesError } = await supabase
       .from("user_roles")
@@ -245,6 +247,12 @@ const DashSettings = () => {
 
   return (
     <DashboardLayout>
+      {isOffline && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm font-medium">
+          <WifiOff className="h-4 w-4 shrink-0" />
+          <span>You're offline — Settings cannot be updated until you reconnect.</span>
+        </div>
+      )}
       <div className="mb-6">
         <h1 className="font-display text-3xl font-bold">Settings</h1>
         <p className="text-muted-foreground mt-1">Manage your pharmacy profile and preferences.</p>
@@ -264,8 +272,8 @@ const DashSettings = () => {
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => onLogo(e.target.files?.[0])} />
-              <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={uploading}>
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => onLogo(e.target.files?.[0])} disabled={isOffline} />
+              <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={uploading || isOffline} title={isOffline ? "Online only" : undefined}>
                 {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                 {form.logo_url ? "Replace logo" : "Upload logo"}
               </Button>
@@ -280,7 +288,7 @@ const DashSettings = () => {
           <div className="grid sm:grid-cols-2 gap-4">
             <div className="sm:col-span-2">
               <Label>Pharmacy / Business name</Label>
-              <Input value={form.name} onChange={(e) => set("name", e.target.value)} className="mt-1.5" placeholder="e.g. MedPlus Pharmacy" />
+              <Input value={form.name} onChange={(e) => set("name", e.target.value)} className="mt-1.5" placeholder="e.g. MedPlus Pharmacy" disabled={isOffline} />
             </div>
             <div className="sm:col-span-2">
               <Label>Business type</Label>
@@ -291,7 +299,7 @@ const DashSettings = () => {
             </div>
             <div className="sm:col-span-2">
               <Label>Phone / WhatsApp</Label>
-              <Input value={form.phone} onChange={(e) => set("phone", e.target.value)} className="mt-1.5" placeholder="+234 801 234 5678" />
+              <Input value={form.phone} onChange={(e) => set("phone", e.target.value)} className="mt-1.5" placeholder="+234 801 234 5678" disabled={isOffline} />
             </div>
           </div>
         </div>
@@ -362,15 +370,15 @@ const DashSettings = () => {
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
               <Label>Bank name</Label>
-              <Input value={form.bank_name} onChange={(e) => set("bank_name", e.target.value)} className="mt-1.5" placeholder="e.g. Zenith Bank" />
+              <Input value={form.bank_name} onChange={(e) => set("bank_name", e.target.value)} className="mt-1.5" placeholder="e.g. Zenith Bank" disabled={isOffline} />
             </div>
             <div>
               <Label>Account number</Label>
-              <Input value={form.bank_account_number} onChange={(e) => set("bank_account_number", e.target.value)} className="mt-1.5" placeholder="e.g. 1012345678" maxLength={10} />
+              <Input value={form.bank_account_number} onChange={(e) => set("bank_account_number", e.target.value)} className="mt-1.5" placeholder="e.g. 1012345678" maxLength={10} disabled={isOffline} />
             </div>
             <div className="sm:col-span-2">
               <Label>Account name</Label>
-              <Input value={form.bank_account_name} onChange={(e) => set("bank_account_name", e.target.value)} className="mt-1.5" placeholder="e.g. PharmAccess Pharmacy Ltd" />
+              <Input value={form.bank_account_name} onChange={(e) => set("bank_account_name", e.target.value)} className="mt-1.5" placeholder="e.g. PharmAccess Pharmacy Ltd" disabled={isOffline} />
             </div>
           </div>
         </div>
@@ -453,7 +461,7 @@ const DashSettings = () => {
               <Users className="h-5 w-5 text-primary" />
               <h2 className="font-display font-semibold text-lg">Staff management</h2>
             </div>
-            <Button size="sm" variant="outline" className="h-8 gap-1.5 w-fit" onClick={() => setAddStaffOpen(true)}>
+            <Button size="sm" variant="outline" className="h-8 gap-1.5 w-fit" onClick={() => setAddStaffOpen(true)} disabled={isOffline} title={isOffline ? "Online only" : undefined}>
               <Plus className="h-3.5 w-3.5" /> Add Staff
             </Button>
           </div>
@@ -542,8 +550,8 @@ const DashSettings = () => {
 
         {/* ── Save Bar ── */}
         <div className="flex justify-end gap-2 sticky bottom-20 lg:bottom-4 z-10 bg-background/80 backdrop-blur p-3 -mx-3 rounded-xl">
-          <Button variant="ghost" onClick={() => setResetOpen(true)}>Reset</Button>
-          <Button variant="hero" onClick={save} disabled={saving}>
+          <Button variant="ghost" onClick={() => setResetOpen(true)} disabled={isOffline}>Reset</Button>
+          <Button variant="hero" onClick={save} disabled={saving || isOffline} title={isOffline ? "Online only" : undefined}>
             {saving ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
             Save changes
           </Button>

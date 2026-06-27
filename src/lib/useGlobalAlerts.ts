@@ -115,6 +115,16 @@ export function useGlobalAlerts() {
   useEffect(() => {
     if (!rid) return;
 
+    const handleOnline = () => {
+      // Re-mount subscription by forcing a re-render or just let it reconnect automatically
+    };
+    
+    window.addEventListener("online", handleOnline);
+
+    if (!navigator.onLine) {
+      return () => window.removeEventListener("online", handleOnline);
+    }
+
     const ch = supabase
       .channel(`global-alerts-${rid}`)
       // ---- New order ----
@@ -127,6 +137,7 @@ export function useGlobalAlerts() {
           filter: `restaurant_id=eq.${rid}`,
         },
         (payload) => {
+          if (!navigator.onLine) return;
           const o: any = payload.new;
           if (!o?.id || seen.current.has(o.id)) return;
           seen.current.add(o.id);
@@ -158,6 +169,7 @@ export function useGlobalAlerts() {
           filter: `restaurant_id=eq.${rid}`,
         },
         (payload) => {
+          if (!navigator.onLine) return;
           const r: any = payload.new;
           if (!r?.id || seen.current.has(r.id)) return;
           seen.current.add(r.id);
@@ -199,7 +211,10 @@ export function useGlobalAlerts() {
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(ch); };
+    return () => { 
+      supabase.removeChannel(ch); 
+      window.removeEventListener("online", handleOnline);
+    };
   }, [rid]);
 }
 
@@ -217,6 +232,15 @@ export function useInventoryAlerts(role: string | null) {
   useEffect(() => {
     // Only alert owners and managers
     if (!rid || (role !== "owner" && role !== "manager")) return;
+    
+    const handleOnline = () => {
+      // Automatic reconnect or remount handling
+    };
+    window.addEventListener("online", handleOnline);
+
+    if (!navigator.onLine) {
+      return () => window.removeEventListener("online", handleOnline);
+    }
 
     const ch = supabase
       .channel(`inventory-alerts-${rid}`)
@@ -229,6 +253,7 @@ export function useInventoryAlerts(role: string | null) {
           filter: `restaurant_id=eq.${rid}`,
         },
         (payload) => {
+          if (!navigator.onLine) return;
           const n: any = payload.new;
           if (!n?.id || seen.current.has(n.id)) return;
           if (n.type !== "stock_out" && n.type !== "low_stock") return;
@@ -272,7 +297,10 @@ export function useInventoryAlerts(role: string | null) {
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(ch); };
+    return () => { 
+      supabase.removeChannel(ch); 
+      window.removeEventListener("online", handleOnline);
+    };
   }, [rid, role]);
 
   return { 

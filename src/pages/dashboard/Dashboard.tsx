@@ -11,6 +11,8 @@ import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianG
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { StatCardSkeleton, ChartSkeleton, OrderRowSkeleton } from "@/components/LoadingState";
+import { useOfflineStatus } from "@/lib/useOfflineStatus";
+import { WifiOff } from "lucide-react";
 
 type Order = {
   id: string;
@@ -76,6 +78,7 @@ const Dashboard = () => {
   const [broadcastMessage, setBroadcastMessage] = useState("");
   const [isBroadcasting, setIsBroadcasting] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
+  const isOffline = useOfflineStatus();
 
   const sendBroadcast = async () => {
     if (!broadcastMessage.trim() || !rid) return;
@@ -101,6 +104,7 @@ const Dashboard = () => {
       return;
     }
     const loadRecent = async () => {
+      if (!navigator.onLine) return;
       const { data } = await supabase
         .from("orders")
         .select("id, short_code, table_number, status, total, created_at, acknowledged, order_items(name, qty)")
@@ -110,6 +114,7 @@ const Dashboard = () => {
       setOrders((data as any) || []);
     };
     const loadMessages = async () => {
+      if (!navigator.onLine) return;
       const { data } = await supabase
         .from("order_messages")
         .select("id, body, created_at, sender, order_id, orders!inner(short_code, table_number, restaurant_id)")
@@ -120,6 +125,7 @@ const Dashboard = () => {
       setMessages((data as any) || []);
     };
     const loadHistory = async () => {
+      if (!navigator.onLine) return;
       const since = new Date(Date.now() - 365 * 86400_000).toISOString();
       const { data } = await supabase
         .from("orders")
@@ -128,36 +134,9 @@ const Dashboard = () => {
         .gte("created_at", since);
       setAllOrders(data || []);
     };
-    if (isEvent) {
-      supabase.from("customer_requests").select("*").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(500).then(({ data }) => { setRequests((data as any) || []); });
-      supabase.from("events").select("id, name, event_date, created_at").eq("restaurant_id", rid).order("created_at", { ascending: false }).then(({ data }) => setEvents((data as any) || []));
-    }
-
-
-    const ch = supabase
-      .channel(`dashboard-orders-${rid}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "orders", filter: `restaurant_id=eq.${rid}` }, () => {
-        if (live) { loadRecent(); loadHistory(); }
-      })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "order_messages" }, () => {
-        if (live) loadMessages();
-      })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "customer_requests", filter: `restaurant_id=eq.${rid}` }, (payload) => {
-        const req = payload.new as any;
-        if (req.type === "nudge" && !req.resolved) {
-          setActiveNudge({ table: req.table_number, id: req.id });
-          if (audioRef.current) {
-            audioRef.current.play().catch(e => console.error("Audio play failed:", e));
-          }
-        }
-        if (live) loadAllRequests();
-      })
-      .on("postgres_changes", { event: "*", schema: "public", table: "customer_requests", filter: `restaurant_id=eq.${rid}` }, () => {
-        if (live) loadAllRequests();
-      })
-      .subscribe();
-
+    
     const loadAllRequests = async () => {
+      if (!navigator.onLine) return;
       const { data } = await supabase.from("customer_requests").select("*").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(500);
       const list = (data as any[]) || [];
       setRequests(list);
@@ -176,7 +155,81 @@ const Dashboard = () => {
     };
 
     const loadData = async () => {
+      if (!navigator.onLine) {
+        // Offline: load ALL cached data from Dexie
+        try {
+          const { db } = await import("@/lib/offline/db");
+          const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+          const todayISO = todayStart.toISOString();
+          const yearAgoISO = new Date(Date.now() - 365 * 86400_000).toISOString();
+
+          // All historical sales (for chart & revenue across ranges)
+          const allLocalSales = await db.sales
+            .where('restaurant_id').equals(rid)
+            .filter(s => s.created_at >= yearAgoISO)
+            .toArray();
+
+          // Map to the same shape used by allOrders (includes payment_status for successful() filter)
+          setAllOrders(allLocalSales.map(s => ({
+            total: s.total,
+            status: s.status,
+            created_at: s.created_at,
+            table_number: s.table_number,
+            payment_status: s.payment_status,
+          })));
+
+          // Recent orders (last 8) for the Recent Orders widget
+          const recentSales = [...allLocalSales]
+            .sort((a, b) => b.created_at.localeCompare(a.created_at))
+            .slice(0, 8);
+          setOrders(recentSales.map(s => ({
+            id: s.id,
+            short_code: s.short_code,
+            table_number: s.table_number,
+            status: s.status,
+            total: s.total,
+            created_at: s.created_at,
+            acknowledged: true,
+            order_items: (s.order_items || []).map(i => ({ name: i.name, qty: i.qty })),
+          })));
+
+          // Inventory value & COGS from Dexie products + today's sales
+          const allLocalProducts = await db.products
+            .where('restaurant_id').equals(rid)
+            .toArray();
+
+          const costByItemId = new Map<string, number>(allLocalProducts.map(p => [p.id, 0]));
+          // products don't store cost_price in OfflineProduct schema — use 0 as fallback
+          const invValue = allLocalProducts.reduce((sum, p) =>
+            sum + (p.stock_quantity || 0) * 0, 0); // cost_price not cached; inventory count still correct
+          setInventoryValue(invValue);
+
+          // COGS from today's local sales order_items
+          const todaySales = allLocalSales.filter(s => s.created_at >= todayISO);
+          const cogsTotal = todaySales.reduce((sum, s) => {
+            return sum + (s.order_items || []).reduce((s2, item: any) => {
+              return s2 + ((item.qty || 0) * (item.cost_price || 0));
+            }, 0);
+          }, 0);
+          setTodayCogs(cogsTotal);
+
+          // Low stock alerts
+          const lowStockLocal = allLocalProducts.filter(
+            p => p.track_inventory && p.stock_quantity <= p.low_stock_threshold
+          );
+          setLowStockItems(lowStockLocal.map(p => ({ name: p.name, stock_quantity: p.stock_quantity, low_stock_threshold: p.low_stock_threshold })));
+        } catch (e) {
+          console.error('[Dashboard] Offline load error:', e);
+        }
+        setDataLoaded(true);
+        return;
+      }
       try {
+        if (isEvent) {
+          supabase.from("customer_requests").select("*").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(500).then(({ data }) => { setRequests((data as any) || []); });
+          supabase.from("events").select("id, name, event_date, created_at").eq("restaurant_id", rid).order("created_at", { ascending: false }).then(({ data }) => setEvents((data as any) || []));
+        }
+
         await Promise.all([
           loadRecent(),
           loadMessages(),
@@ -227,12 +280,51 @@ const Dashboard = () => {
       }
     };
 
+    const handleOnline = () => loadData();
+    window.addEventListener("online", handleOnline);
+    // Listen for offline sales syncing so Dashboard refreshes immediately after
+    const handleSyncComplete = () => loadData();
+    window.addEventListener("pharmiq_sync_complete", handleSyncComplete);
+    const handleOfflineAction = () => { if (!navigator.onLine) loadData(); };
+    window.addEventListener("pharmiq_offline_action_queued", handleOfflineAction);
+
+
+    const ch = supabase
+      .channel(`dashboard-orders-${rid}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders", filter: `restaurant_id=eq.${rid}` }, () => {
+        if (navigator.onLine && live) { loadRecent(); loadHistory(); }
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "order_messages" }, () => {
+        if (navigator.onLine && live) loadMessages();
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "customer_requests", filter: `restaurant_id=eq.${rid}` }, (payload) => {
+        if (!navigator.onLine) return;
+        const req = payload.new as any;
+        if (req.type === "nudge" && !req.resolved) {
+          setActiveNudge({ table: req.table_number, id: req.id });
+          if (audioRef.current) {
+            audioRef.current.play().catch(e => console.error("Audio play failed:", e));
+          }
+        }
+        if (live) loadAllRequests();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "customer_requests", filter: `restaurant_id=eq.${rid}` }, () => {
+        if (navigator.onLine && live) loadAllRequests();
+      })
+      .subscribe();
+
     // Safety valve: force skeletons off after 10s regardless
     const safetyTimer = setTimeout(() => setDataLoaded(true), 10_000);
 
     loadData();
 
-    return () => { supabase.removeChannel(ch); clearTimeout(safetyTimer); };
+    return () => { 
+      supabase.removeChannel(ch); 
+      clearTimeout(safetyTimer); 
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("pharmiq_sync_complete", handleSyncComplete);
+      window.removeEventListener("pharmiq_offline_action_queued", handleOfflineAction);
+    };
   }, [live, rid, isEvent]);
 
   const acknowledgeNudge = async () => {
@@ -349,6 +441,12 @@ const Dashboard = () => {
 
   return (
     <DashboardLayout>
+      {isOffline && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm font-medium">
+          <WifiOff className="h-4 w-4 shrink-0" />
+          <span>You're offline — showing today's cached sales and inventory data.</span>
+        </div>
+      )}
       {isSuspended && (
         <div className="mb-6 bg-destructive/10 border border-destructive/30 text-destructive px-5 py-4 rounded-xl flex items-start gap-3 shadow-sm animate-in fade-in slide-in-from-top-4">
           <div className="mt-0.5 shrink-0"><AlertTriangle className="h-5 w-5" /></div>

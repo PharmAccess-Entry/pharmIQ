@@ -13,6 +13,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { useRestaurant } from "@/lib/restaurant";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { formatNaira } from "@/lib/format";
+import { useOfflineStatus } from "@/lib/useOfflineStatus";
+import { WifiOff } from "lucide-react";
 
 type Expense = {
   id: string;
@@ -42,6 +44,7 @@ export default function Expenses() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const isOffline = useOfflineStatus();
   
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -55,20 +58,35 @@ export default function Expenses() {
   useEffect(() => {
     if (!rid) return;
     loadExpenses();
+    const handler = () => loadExpenses();
+    window.addEventListener("pharmiq_sync_complete", handler);
+    return () => window.removeEventListener("pharmiq_sync_complete", handler);
   }, [rid]);
 
   const loadExpenses = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("expenses")
-      .select("*")
-      .eq("restaurant_id", rid)
-      .order("expense_date", { ascending: false });
-      
-    if (error) {
-      toast.error("Failed to load expenses");
+    if (navigator.onLine) {
+      const { data, error } = await supabase
+        .from("expenses")
+        .select("*")
+        .eq("restaurant_id", rid)
+        .order("expense_date", { ascending: false });
+      if (error) {
+        toast.error("Failed to load expenses");
+      } else {
+        const rows = (data || []) as Expense[];
+        setExpenses(rows);
+        // Snapshot into Dexie
+        const { db } = await import("@/lib/offline/db");
+        await db.expenses.where("restaurant_id").equals(rid!).delete();
+        if (rows.length > 0) {
+          await db.expenses.bulkPut(rows.map(e => ({ ...e, date: (e as any).expense_date || e.created_at?.split('T')[0] })) as any[]);
+        }
+      }
     } else {
-      setExpenses(data || []);
+      const { db } = await import("@/lib/offline/db");
+      const rows = await db.expenses.where("restaurant_id").equals(rid!).reverse().sortBy("date");
+      setExpenses(rows.map(r => ({ ...r, expense_date: r.date, description: r.description })) as unknown as Expense[]);
     }
     setLoading(false);
   };
@@ -79,23 +97,39 @@ export default function Expenses() {
     }
     
     setSaving(true);
-    const payload = {
+    const { v4: uuidv4 } = await import("uuid");
+    const now = new Date().toISOString();
+    const payload: any = {
+      id: uuidv4(),
       restaurant_id: rid,
       category: form.category,
       amount: Number(form.amount),
       description: form.description || null,
-      expense_date: form.expense_date
+      expense_date: form.expense_date,
+      date: form.expense_date,
+      created_at: now,
     };
 
-    const { error } = await supabase.from("expenses").insert(payload);
-    
-    setSaving(false);
-    if (error) {
-      toast.error(error.message);
+    if (navigator.onLine) {
+      const { error } = await supabase.from("expenses").insert(payload);
+      setSaving(false);
+      if (error) {
+        toast.error(error.message);
+      } else {
+        toast.success("Expense recorded");
+        setModalOpen(false);
+        loadExpenses();
+      }
     } else {
-      toast.success("Expense recorded");
+      const { db } = await import("@/lib/offline/db");
+      const { useOfflineQueue } = await import("@/lib/offline/useOfflineQueue");
+      const { queueAction } = useOfflineQueue();
+      await db.expenses.put(payload);
+      await queueAction(rid!, "EXPENSE_CREATE", payload);
+      setExpenses(prev => [payload as unknown as Expense, ...prev]);
+      toast.success("Expense saved offline — will sync when connected");
       setModalOpen(false);
-      loadExpenses();
+      setSaving(false);
     }
   };
 
@@ -120,6 +154,12 @@ export default function Expenses() {
 
   return (
     <DashboardLayout>
+      {isOffline && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm font-medium">
+          <WifiOff className="h-4 w-4 shrink-0" />
+          <span>You're offline — showing cached expenses. Adding new expenses is disabled until you reconnect.</span>
+        </div>
+      )}
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
           <div>
@@ -134,7 +174,7 @@ export default function Expenses() {
               expense_date: new Date().toISOString().split('T')[0]
             });
             setModalOpen(true);
-          }}>
+          }} disabled={isOffline} title={isOffline ? "Online only" : undefined}>
             <Plus className="h-4 w-4 mr-2" />
             Record Expense
           </Button>

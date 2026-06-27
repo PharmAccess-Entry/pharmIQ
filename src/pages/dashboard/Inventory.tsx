@@ -15,6 +15,8 @@ import { useRestaurant } from "@/lib/restaurant";
 import { Badge } from "@/components/ui/badge";
 import { CustomDatePicker } from "@/components/ui/custom-date-picker";
 import { CurrencyInput } from "@/components/ui/currency-input";
+import { useOfflineStatus } from "@/lib/useOfflineStatus";
+import { WifiOff } from "lucide-react";
 
 type MenuItem = {
   id: string;
@@ -38,6 +40,7 @@ const Inventory = () => {
   const [items, setItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const isOffline = useOfflineStatus();
 
   // Restock modal state
   const [restockModalOpen, setRestockModalOpen] = useState(false);
@@ -68,17 +71,27 @@ const Inventory = () => {
   const loadItems = async () => {
     if (!rid) return;
     setLoading(true);
-    const { data, error } = await supabase
-      .from("menu_items")
-      .select("id, name, category, price, image, available, track_inventory, stock_quantity, low_stock_threshold, auto_hide_out_of_stock, expiry_date")
-      .eq("restaurant_id", rid)
-      .order("category")
-      .order("name");
-
-    if (error) {
-      toast.error("Failed to load inventory");
+    if (navigator.onLine) {
+      const { data, error } = await supabase
+        .from("menu_items")
+        .select("id, name, category, price, image, available, track_inventory, stock_quantity, low_stock_threshold, auto_hide_out_of_stock, expiry_date")
+        .eq("restaurant_id", rid)
+        .order("category")
+        .order("name");
+      if (error) {
+        toast.error("Failed to load inventory");
+      } else {
+        const rows = (data as MenuItem[]) || [];
+        setItems(rows);
+        // Snapshot into Dexie (shared with POS)
+        const { db } = await import("@/lib/offline/db");
+        await db.products.bulkPut(rows.map(r => ({ ...r, restaurant_id: rid, last_synced_at: Date.now(), description: null, barcode: null })) as any[]);
+      }
     } else {
-      setItems((data as MenuItem[]) || []);
+      // Offline: read from Dexie products table (shared with POS)
+      const { db } = await import("@/lib/offline/db");
+      const rows = await db.products.where("restaurant_id").equals(rid).sortBy("name");
+      setItems(rows as unknown as MenuItem[]);
     }
     setLoading(false);
   };
@@ -87,9 +100,18 @@ const Inventory = () => {
     if (rid) {
       loadItems();
       // Load suppliers for GRN dropdown
-      supabase.from("suppliers").select("id, name").eq("restaurant_id", rid).eq("status", "active").order("name")
-        .then(({ data }) => setSuppliers(data || []));
+      if (navigator.onLine) {
+        supabase.from("suppliers").select("id, name").eq("restaurant_id", rid).eq("status", "active").order("name")
+          .then(({ data }) => setSuppliers(data || []));
+      } else {
+        import("@/lib/offline/db").then(({ db }) =>
+          db.suppliers.where("restaurant_id").equals(rid).filter(s => s.status === "active").sortBy("name").then(rows => setSuppliers(rows as any[]))
+        );
+      }
     }
+    const handler = () => loadItems();
+    window.addEventListener("pharmiq_sync_complete", handler);
+    return () => window.removeEventListener("pharmiq_sync_complete", handler);
   }, [rid]);
 
   const toggleTracking = async (item: MenuItem, checked: boolean) => {
@@ -371,10 +393,10 @@ const Inventory = () => {
         </div>
         {(!isEvent || eventPaid) ? (
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setGrnOpen(true)} className="gap-2">
+            <Button variant="outline" onClick={() => setGrnOpen(true)} className="gap-2" disabled={isOffline} title={isOffline ? "Online only" : undefined}>
               <PackagePlus className="h-4 w-4" /> <span className="hidden sm:inline">Receive Stock</span>
             </Button>
-            <Button variant="outline" onClick={() => { setLogsOpen(true); loadLogs(); }} className="gap-2">
+            <Button variant="outline" onClick={() => { setLogsOpen(true); loadLogs(); }} className="gap-2" disabled={isOffline} title={isOffline ? "Online only" : undefined}>
               <History className="h-4 w-4" /> <span className="hidden sm:inline">Activity Log</span>
             </Button>
             <Button variant="outline" onClick={exportCsv} className="gap-2">
@@ -383,6 +405,13 @@ const Inventory = () => {
           </div>
         ) : null}
       </div>
+
+      {isOffline && (
+        <div className="mb-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-sm font-medium">
+          <WifiOff className="h-4 w-4 shrink-0" />
+          <span>You're offline — showing cached inventory data. Actions may be limited.</span>
+        </div>
+      )}
 
       {isEvent && eventPaid === false ? (
         <div className="bg-card border border-dashed border-border rounded-2xl p-10 sm:p-14 text-center">
@@ -639,7 +668,7 @@ const Inventory = () => {
             if (!open) { setAdjustQty(""); setNewThreshold(""); setSelectedItem(null); setAdjustmentReason("manual_correction"); setAdjustmentNote(""); }
             setRestockModalOpen(open);
           }}>
-            <DialogContent className="sm:max-w-[400px]">
+            <DialogContent className="sm:max-w-[400px] max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Adjust Stock</DialogTitle>
               </DialogHeader>

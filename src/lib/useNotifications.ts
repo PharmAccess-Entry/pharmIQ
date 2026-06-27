@@ -28,6 +28,11 @@ export function useNotifications() {
       setLoading(false);
       return;
     }
+    if (!navigator.onLine) {
+      setLoading(false);
+      return;
+    }
+
     const { data, count } = await supabase
       .from("notifications")
       .select("*", { count: "exact" })
@@ -42,7 +47,7 @@ export function useNotifications() {
   }, [rid]);
 
   const fetchMore = useCallback(async () => {
-    if (!rid || !hasMore) return;
+    if (!rid || !hasMore || !navigator.onLine) return;
     const { data, count } = await supabase
       .from("notifications")
       .select("*", { count: "exact" })
@@ -66,13 +71,25 @@ export function useNotifications() {
    useEffect(() => {
     if (!rid) return;
     load();
+    
+    const handleOnline = () => {
+      load();
+    };
+    window.addEventListener("online", handleOnline);
+
+    if (!navigator.onLine) {
+      return () => {
+        window.removeEventListener("online", handleOnline);
+      };
+    }
+
     const ch = supabase
       .channel(`notifications-feed-${rid}-${Math.random().toString(36).slice(2, 9)}`)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "notifications", filter: `restaurant_id=eq.${rid}` },
         () => {
-          load();
+          if (navigator.onLine) load();
           try {
             // Play a notification sound
             const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
@@ -83,16 +100,18 @@ export function useNotifications() {
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "notifications", filter: `restaurant_id=eq.${rid}` },
-        () => load()
+        () => { if (navigator.onLine) load(); }
       )
       .on(
         "postgres_changes",
         { event: "DELETE", schema: "public", table: "notifications", filter: `restaurant_id=eq.${rid}` },
-        () => load()
+        () => { if (navigator.onLine) load(); }
       )
       .subscribe();
+      
     return () => {
       supabase.removeChannel(ch);
+      window.removeEventListener("online", handleOnline);
     };
   }, [load, rid]);
 

@@ -57,7 +57,8 @@ export const useOfflineSync = () => {
             p_cash_given: p.cash_given,
             p_intent: p.intent,
             p_items: p.order_items, // array of pharmacy_order_item
-            p_shift_id: p.shift_id || null
+            p_shift_id: p.shift_id || null,
+            p_order_id: p.id
           });
           
           if (error) throw error;
@@ -75,6 +76,34 @@ export const useOfflineSync = () => {
         }
         else if (item.type === 'SHIFT_CLOSE') {
             const { error } = await supabase.from('shifts').update(item.payload.data).eq('id', item.payload.id);
+            if (error) throw error;
+        }
+        else if (item.type === 'PATIENT_CREATE') {
+            const { error } = await supabase.from('patients').insert(item.payload);
+            if (error) throw error;
+        }
+        else if (item.type === 'PATIENT_UPDATE') {
+            const { error } = await supabase.from('patients').update(item.payload.data).eq('id', item.payload.id);
+            if (error) throw error;
+        }
+        else if (item.type === 'SUPPLIER_CREATE') {
+            const { error } = await supabase.from('suppliers').insert(item.payload);
+            if (error) throw error;
+        }
+        else if (item.type === 'SUPPLIER_UPDATE') {
+            const { error } = await supabase.from('suppliers').update(item.payload.data).eq('id', item.payload.id);
+            if (error) throw error;
+        }
+        else if (item.type === 'PRODUCT_CREATE') {
+            const { error } = await supabase.from('menu_items').insert(item.payload);
+            if (error) throw error;
+        }
+        else if (item.type === 'PRODUCT_UPDATE') {
+            const { error } = await supabase.from('menu_items').update(item.payload.data).eq('id', item.payload.id);
+            if (error) throw error;
+        }
+        else if (item.type === 'PRODUCT_DELETE') {
+            const { error } = await supabase.from('menu_items').delete().eq('id', item.payload.id);
             if (error) throw error;
         }
 
