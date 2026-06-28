@@ -366,16 +366,16 @@ export default function Reconciliation() {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
             <div className="bg-card w-full max-w-3xl rounded-xl shadow-lg border border-border overflow-hidden flex flex-col max-h-[90vh]">
               {/* Header */}
-              <div className="p-4 border-b border-border flex justify-between items-center bg-muted/30">
+              <div className="p-4 border-b border-border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 bg-muted/30">
                 <div>
                   <h2 className="font-bold text-lg">Reconciliation Details</h2>
                   <p className="text-sm text-muted-foreground">{formatDate(viewedReconciliation.created_at)}</p>
                 </div>
-                <div className="flex gap-2 print:hidden">
-                  <Button variant="outline" onClick={() => window.print()} className="gap-2 font-bold">
+                <div className="flex gap-2 w-full sm:w-auto print:hidden">
+                  <Button variant="outline" onClick={() => window.print()} className="flex-1 sm:flex-none gap-2 font-bold">
                     Print Log
                   </Button>
-                  <Button variant="ghost" onClick={() => setViewedReconciliation(null)}>Close</Button>
+                  <Button variant="ghost" onClick={() => setViewedReconciliation(null)} className="flex-1 sm:flex-none">Close</Button>
                 </div>
               </div>
               

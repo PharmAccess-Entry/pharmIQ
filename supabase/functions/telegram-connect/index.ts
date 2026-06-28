@@ -7,7 +7,7 @@ const corsHeaders = {
 };
 
 // Use the bot username provided by the user
-const BOT_USERNAME = "PharmIQ_AdminBot";
+const BOT_USERNAME = "PharmIQBot";
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {

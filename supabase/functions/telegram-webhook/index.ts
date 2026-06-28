@@ -11,8 +11,8 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Global bot token from environment
-    const botToken = Deno.env.get('TELEGRAM_BOT_TOKEN') || "8959478563:AAHKTrDoxZnX8L7gmhsd_cJiQrqRIEnwpu4";
+    // Use the PharmIQBot (Assistant) token for this webhook
+    const botToken = "8890384452:AAEkKSGm4U-s9b6qGON9QqikvjoQrcI17FI";
     
     // Verify Webhook Secret (optional but recommended for security)
     const secretToken = req.headers.get('x-telegram-bot-api-secret-token');

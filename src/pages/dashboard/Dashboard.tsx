@@ -796,10 +796,19 @@ const SubscriptionCard = () => {
   const status = restaurant.subscription_status ?? "trial";
   const tableCount = restaurant.table_count || 0;
   const currentPlanName = restaurant.subscription_plan || "PharmIQ License";
-  const limitLabel = `${tableCount} registers capacity`;
   const trialLeft = trialDaysLeft(restaurant.trial_ends_at);
+  const expiryLeft = trialDaysLeft(restaurant.subscription_expires_at ?? null);
   const isActive = status === "active";
   const isTrial = status === "trial";
+  const period = restaurant.subscription_period === "annual" ? "Yearly" : "Monthly";
+
+  const expiryDate = restaurant.subscription_expires_at
+    ? new Date(restaurant.subscription_expires_at).toLocaleDateString("en-NG", {
+        day: "numeric", month: "short", year: "numeric",
+      })
+    : null;
+
+  const urgency = isActive && expiryLeft <= 7;
 
   return (
     <div className="bg-card border border-border rounded-2xl shadow-soft p-4 sm:p-5 flex flex-wrap items-center justify-between gap-4 mb-10">
@@ -817,7 +826,17 @@ const SubscriptionCard = () => {
             </span>
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
-            {restaurant.subscription_period === "annual" ? "Yearly" : "Monthly"} billing
+            {period} billing
+            {isActive && expiryDate && (
+              <span className={`ml-2 font-medium ${urgency ? "text-destructive" : "text-muted-foreground"}`}>
+                · Renews {expiryDate}
+                {urgency
+                  ? ` (${expiryLeft}d left!)`
+                  : expiryLeft > 0
+                  ? ` (${expiryLeft} days)`
+                  : ""}
+              </span>
+            )}
           </p>
         </div>
       </div>

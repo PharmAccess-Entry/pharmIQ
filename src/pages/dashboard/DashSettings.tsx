@@ -240,12 +240,17 @@ const DashSettings = () => {
 
   const testTelegram = async () => {
     setTestingTg(true);
-    const { error } = await supabase.functions.invoke("telegram-notify", {
+    const { error, data } = await supabase.functions.invoke("telegram-notify", {
       body: { restaurant_id: restaurant?.id, message: "👋 Test notification from PharmIQ!\n\nYour integration is working perfectly." }
     });
     setTestingTg(false);
-    if (error) toast.error("Failed to send test notification");
-    else toast.success("Test notification sent!");
+    if (error) {
+      // Try to extract a meaningful error message from the response body
+      const detail = (data as any)?.error || (data as any)?.details?.description || error.message;
+      toast.error(detail || "Failed to send test notification");
+    } else {
+      toast.success("Test notification sent!");
+    }
   };
 
   const set = (k: keyof typeof form, v: any) => setForm((p) => ({ ...p, [k]: v }));
@@ -772,14 +777,15 @@ const DashSettings = () => {
                     </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                   <Button variant="outline" size="sm" onClick={() => setShowPrefs(!showPrefs)} disabled={isOffline}>
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                   <Button variant="outline" size="sm" onClick={() => setShowPrefs(!showPrefs)} disabled={isOffline} className="flex-1 sm:flex-none">
                       Preferences
                    </Button>
-                   <Button variant="outline" size="sm" onClick={testTelegram} disabled={testingTg || isOffline}>
+                   <Button variant="outline" size="sm" onClick={testTelegram} disabled={testingTg || isOffline} className="flex-1 sm:flex-none gap-2">
                     {testingTg ? <Loader2 className="h-4 w-4 animate-spin" /> : <FlaskConical className="h-4 w-4" />}
+                    <span className="sm:hidden">Test</span>
                    </Button>
-                   <Button variant="ghost" size="sm" onClick={() => setDisconnectConfirmOpen(true)} disabled={isOffline} className="text-destructive hover:bg-destructive/10 hover:text-destructive">
+                   <Button variant="ghost" size="sm" onClick={() => setDisconnectConfirmOpen(true)} disabled={isOffline} className="flex-1 sm:flex-none text-destructive hover:bg-destructive/10 hover:text-destructive">
                     Disconnect
                   </Button>
                 </div>

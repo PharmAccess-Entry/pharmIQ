@@ -54,8 +54,8 @@ serve(async (req) => {
         }
     }
 
-    // Use global bot token
-    const botToken = Deno.env.get('TELEGRAM_BOT_TOKEN') || "8959478563:AAHKTrDoxZnX8L7gmhsd_cJiQrqRIEnwpu4";
+    // Use the PharmIQBot (Assistant) token
+    const botToken = "8890384452:AAEkKSGm4U-s9b6qGON9QqikvjoQrcI17FI";
 
     // Send the message
     const telegramRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {

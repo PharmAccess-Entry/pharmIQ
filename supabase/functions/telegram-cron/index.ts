@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0';
 
-const BOT_TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN') || '8959478563:AAHKTrDoxZnX8L7gmhsd_cJiQrqRIEnwpu4';
+const BOT_TOKEN = "8890384452:AAEkKSGm4U-s9b6qGON9QqikvjoQrcI17FI";
 const API = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 serve(async (req) => {
