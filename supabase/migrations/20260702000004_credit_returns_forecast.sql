@@ -20,11 +20,11 @@ CREATE TABLE IF NOT EXISTS public.customer_transactions (
 ALTER TABLE public.customer_transactions ENABLE ROW LEVEL SECURITY;
 
 DO $$ BEGIN
-  CREATE POLICY "Enable read for users based on restaurant_id" ON public.customer_transactions FOR SELECT USING (restaurant_id IN (SELECT restaurant_id FROM public.staff WHERE user_id = auth.uid()));
+  CREATE POLICY "Enable read for users based on restaurant_id" ON public.customer_transactions FOR SELECT USING (restaurant_id IN (SELECT restaurant_id FROM public.user_roles WHERE user_id = auth.uid()));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
-  CREATE POLICY "Enable insert for users based on restaurant_id" ON public.customer_transactions FOR INSERT WITH CHECK (restaurant_id IN (SELECT restaurant_id FROM public.staff WHERE user_id = auth.uid()));
+  CREATE POLICY "Enable insert for users based on restaurant_id" ON public.customer_transactions FOR INSERT WITH CHECK (restaurant_id IN (SELECT restaurant_id FROM public.user_roles WHERE user_id = auth.uid()));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE INDEX IF NOT EXISTS idx_customer_tx_restaurant ON public.customer_transactions(restaurant_id);
@@ -47,11 +47,11 @@ CREATE TABLE IF NOT EXISTS public.returns (
 ALTER TABLE public.returns ENABLE ROW LEVEL SECURITY;
 
 DO $$ BEGIN
-  CREATE POLICY "Enable read for users based on restaurant_id" ON public.returns FOR SELECT USING (restaurant_id IN (SELECT restaurant_id FROM public.staff WHERE user_id = auth.uid()));
+  CREATE POLICY "Enable read for users based on restaurant_id" ON public.returns FOR SELECT USING (restaurant_id IN (SELECT restaurant_id FROM public.user_roles WHERE user_id = auth.uid()));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
-  CREATE POLICY "Enable insert for users based on restaurant_id" ON public.returns FOR INSERT WITH CHECK (restaurant_id IN (SELECT restaurant_id FROM public.staff WHERE user_id = auth.uid()));
+  CREATE POLICY "Enable insert for users based on restaurant_id" ON public.returns FOR INSERT WITH CHECK (restaurant_id IN (SELECT restaurant_id FROM public.user_roles WHERE user_id = auth.uid()));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE TABLE IF NOT EXISTS public.return_items (
@@ -67,11 +67,11 @@ CREATE TABLE IF NOT EXISTS public.return_items (
 ALTER TABLE public.return_items ENABLE ROW LEVEL SECURITY;
 
 DO $$ BEGIN
-  CREATE POLICY "Enable read for users based on restaurant_id" ON public.return_items FOR SELECT USING (return_id IN (SELECT id FROM public.returns WHERE restaurant_id IN (SELECT restaurant_id FROM public.staff WHERE user_id = auth.uid())));
+  CREATE POLICY "Enable read for users based on restaurant_id" ON public.return_items FOR SELECT USING (return_id IN (SELECT id FROM public.returns WHERE restaurant_id IN (SELECT restaurant_id FROM public.user_roles WHERE user_id = auth.uid())));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 DO $$ BEGIN
-  CREATE POLICY "Enable insert for users based on restaurant_id" ON public.return_items FOR INSERT WITH CHECK (return_id IN (SELECT id FROM public.returns WHERE restaurant_id IN (SELECT restaurant_id FROM public.staff WHERE user_id = auth.uid())));
+  CREATE POLICY "Enable insert for users based on restaurant_id" ON public.return_items FOR INSERT WITH CHECK (return_id IN (SELECT id FROM public.returns WHERE restaurant_id IN (SELECT restaurant_id FROM public.user_roles WHERE user_id = auth.uid())));
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Update order_items to track total returned
