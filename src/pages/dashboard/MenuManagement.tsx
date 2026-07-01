@@ -306,6 +306,15 @@ const MenuManagement = () => {
     const isIncluded = /soup|stew|sauce/i.test(form.category);
     const price = (isEvent || isIncluded) ? Number(form.price || 0) : Number(form.price);
     if (!isEvent && !isIncluded && (!price || price < 0)) return toast.error("Enter a valid price");
+    // 🛡️ Price cap: prevent accidental data-entry errors that corrupt inventory valuation
+    const MAX_PRICE_NGN = 1_000_000;
+    if (!isEvent && price > MAX_PRICE_NGN) {
+      return toast.error(`Price cannot exceed ${MAX_PRICE_NGN.toLocaleString()} — please check the price and try again.`);
+    }
+    const costPrice = Number(form.cost_price || 0);
+    if (isPharmacy && costPrice > MAX_PRICE_NGN) {
+      return toast.error(`Cost Price cannot exceed ${MAX_PRICE_NGN.toLocaleString()} — please check and try again.`);
+    }
     if (!form.category) return toast.error("Pick a category");
     if (isPharmacy && (form.cost_price === "" || Number(form.cost_price) <= 0)) {
       return toast.error("Cost Price is required — enter the amount you bought this product for");
@@ -319,6 +328,14 @@ const MenuManagement = () => {
     // Duplicate detection: warn if product name already exists (skip when editing)
     if (!form.id && items.some(i => i.name.trim().toLowerCase() === form.name.trim().toLowerCase())) {
       return toast.error(`A product named "${form.name.trim()}" already exists. Edit the existing product instead.`);
+    }
+    // 🛡️ Duplicate barcode detection: two products with the same barcode break POS scanning
+    const barcodeValue = form.barcode.trim();
+    if (barcodeValue) {
+      const duplicateBarcode = items.find(i => i.barcode && i.barcode.trim() === barcodeValue && i.id !== form.id);
+      if (duplicateBarcode) {
+        return toast.error(`Barcode "${barcodeValue}" is already assigned to "${duplicateBarcode.name}". Each barcode must be unique.`);
+      }
     }
     setSavingItem(true);
     const payload = {
