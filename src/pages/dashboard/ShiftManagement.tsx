@@ -5,6 +5,7 @@ import { useRestaurant } from "@/lib/restaurant";
 import { useAuth } from "@/lib/auth";
 import { formatNaira } from "@/lib/format";
 import { DashboardLayout } from "@/components/DashboardLayout";
+import { Navigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +26,11 @@ export default function ShiftManagement() {
   const { user } = useAuth();
   const rid = restaurant?.id;
   const isAdmin = role === "owner" || role === "manager";
+
+  // Staff guard — only owners and managers may view shift management
+  if (role !== null && role !== "owner" && role !== "manager") {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   const [loading, setLoading] = useState(true);
   const [shifts, setShifts] = useState<any[]>([]);

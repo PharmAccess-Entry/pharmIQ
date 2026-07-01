@@ -122,17 +122,23 @@ export const useOfflineSync = () => {
         anySuccess = true;
       } catch (err: any) {
         console.error(`[Offline Sync] Failed for item ${item.id}:`, err);
-        await db.offline_queue.update(item.id, { 
-          status: 'failed', 
-          error_message: err.message || 'Unknown error'
-        });
         
         if (item.attempts >= 3) {
-           toast.error(`Sync failed: ${err.message || 'Unknown error'}. Click "pending" to clear queue.`);
+           await db.offline_queue.update(item.id, { 
+             status: 'conflict', 
+             error_message: err.message || 'Unknown error'
+           });
+           toast.error(`Sync conflict: ${err.message || 'Unknown error'}. Item skipped.`);
+           // Continue processing other items instead of blocking the queue
+           continue;
+        } else {
+           await db.offline_queue.update(item.id, { 
+             status: 'failed', 
+             error_message: err.message || 'Unknown error'
+           });
+           // Stop current batch if we hit a failure to preserve order and retry later
+           break; 
         }
-        
-        // Stop current batch if we hit a failure to preserve order and retry later
-        break; 
       }
     }
 

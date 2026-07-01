@@ -13,6 +13,7 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
 import { WifiOff } from "lucide-react";
 import { CardGridSkeleton } from "@/components/LoadingState";
+import { useTelegramAlerts } from "@/lib/useTelegramAlerts";
 
 type Supplier = {
   id: string;
@@ -34,6 +35,7 @@ export default function Suppliers() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const isOffline = useOfflineStatus();
+  const { sendAlert } = useTelegramAlerts();
 
   useEffect(() => {
     if (!restaurant?.id) return;
@@ -112,6 +114,13 @@ export default function Suppliers() {
       }
       await db.suppliers.update(selectedSupplier.id, payload as any);
       setSuppliers(suppliers.map(s => s.id === selectedSupplier.id ? { ...s, ...payload } : s));
+      
+      sendAlert(
+        "🏢 Supplier Updated",
+        `Name: ${name}\nContact: ${contact_name || "N/A"}\nPhone: ${phone || "N/A"}\nStatus: ${status}`,
+        "major_events"
+      );
+
       toast.success(navigator.onLine ? "Supplier updated successfully" : "Saved offline — will sync when connected");
       setOpenModal(false);
     } else {
@@ -139,6 +148,13 @@ export default function Suppliers() {
         setSuppliers([fullPayload as unknown as Supplier, ...suppliers]);
         toast.success("Supplier saved offline — will sync when connected");
       }
+
+      sendAlert(
+        "🏢 New Supplier Added",
+        `Name: ${name}\nContact: ${contact_name || "N/A"}\nPhone: ${phone || "N/A"}`,
+        "major_events"
+      );
+
       setOpenModal(false);
     }
     setSaving(false);

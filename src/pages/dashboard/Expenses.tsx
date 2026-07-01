@@ -16,6 +16,7 @@ import { formatNaira } from "@/lib/format";
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
 import { WifiOff } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useTelegramAlerts } from "@/lib/useTelegramAlerts";
 
 type Expense = {
   id: string;
@@ -46,6 +47,7 @@ export default function Expenses() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const isOffline = useOfflineStatus();
+  const { sendAlert } = useTelegramAlerts();
   
   const [modalOpen, setModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -117,6 +119,13 @@ export default function Expenses() {
         toast.error(error.message);
       } else {
         toast.success("Expense recorded");
+        
+        sendAlert(
+          "💸 New Expense Logged",
+          `Category: ${form.category}\nAmount: ${formatNaira(Number(form.amount))}\nDescription: ${form.description || "N/A"}`,
+          "major_events"
+        );
+
         setModalOpen(false);
         loadExpenses();
       }
@@ -129,6 +138,13 @@ export default function Expenses() {
       await queueAction(rid!, "EXPENSE_CREATE", supabasePayload);
       setExpenses(prev => [supabasePayload as unknown as Expense, ...prev]);
       toast.success("Expense saved offline — will sync when connected");
+
+      sendAlert(
+        "💸 New Expense Logged",
+        `Category: ${form.category}\nAmount: ${formatNaira(Number(form.amount))}\nDescription: ${form.description || "N/A"}`,
+        "major_events"
+      );
+
       setModalOpen(false);
       setSaving(false);
     }

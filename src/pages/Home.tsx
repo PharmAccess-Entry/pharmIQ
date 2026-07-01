@@ -17,7 +17,6 @@ const WEB3FORMS_KEY = "2aefb05d-d497-4c17-a5c6-e742212509e5";
 
 const Home = () => {
   const navigate = useNavigate();
-  const [history, setHistory] = useState<any[]>([]);
 
   // Lead Capture State
   const [demoForm, setDemoForm] = useState({ name: "", phone: "", restaurant: "" });
@@ -26,30 +25,7 @@ const Home = () => {
   // Active Use Case tab
   const [activeTab, setActiveTab] = useState<"checkout" | "inventory" | "shift">("checkout");
 
-  // Determine initial view from persisted preference
-  const getInitialView = (): "customer" | "owner" => {
-    const pref = localStorage.getItem("st.home_view") as "customer" | "owner" | null;
-    if (pref) return pref;
-    // First time: if they have scan history they're likely a customer
-    const scanHistory = localStorage.getItem("st.scan_history");
-    if (scanHistory) return "customer";
-    return "owner";
-  };
 
-  const [view, setView] = useState<"customer" | "owner">(getInitialView);
-
-  const switchView = (next: "customer" | "owner") => {
-    localStorage.setItem("st.home_view", next);
-    setView(next);
-  };
-
-  useEffect(() => {
-    const saved = localStorage.getItem("st.scan_history");
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      setHistory(parsed.slice(0, 3));
-    }
-  }, []);
 
   const handleDemoSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -197,64 +173,7 @@ const Home = () => {
     ]
   };
 
-  if (view === "customer") {
-    return (
-      <div className="min-h-screen flex flex-col bg-background p-6 max-w-2xl mx-auto">
-        <Helmet>
-          <title>Scan to Order — PharmIQ Nigeria</title>
-        </Helmet>
-        <main className="flex-1 flex flex-col items-center justify-center space-y-12 animate-in fade-in duration-700">
-          <div className="text-center space-y-4">
-            <div className="h-20 w-20 rounded-[2.5rem] bg-primary shadow-glow grid place-items-center mx-auto mb-6">
-              <UtensilsCrossed className="h-10 w-10 text-primary-foreground" />
-            </div>
-            <h1 className="font-display text-4xl font-black tracking-tight">Hungry? 😋</h1>
-            <p className="text-muted-foreground font-medium">Scan the QR code on your table to browse the menu and order.</p>
-          </div>
 
-          <div className="w-full space-y-4">
-            <Button size="xl" variant="hero" className="w-full h-20 rounded-[2rem] text-xl font-black gap-4 shadow-glow" onClick={() => { switchView("customer"); navigate("/scan"); }}>
-              <Camera className="h-8 w-8" />
-              SCAN TO ORDER
-            </Button>
-            
-            {history.length > 0 && (
-              <div className="pt-8 space-y-4">
-                <div className="flex items-center gap-2 px-2">
-                  <History className="h-4 w-4 text-muted-foreground" />
-                  <h2 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Recently Visited</h2>
-                </div>
-                <div className="grid gap-3">
-                  {history.map((h, i) => (
-                    <button 
-                      key={i} 
-                      onClick={() => navigate(`/menu/${h.table}?r=${h.restaurantId}`)}
-                      className="w-full flex items-center justify-between p-5 rounded-[1.5rem] bg-card border border-border shadow-soft hover:border-primary/40 transition-all group"
-                    >
-                      <div className="text-left">
-                        <div className="font-bold text-base group-hover:text-primary transition-colors">{h.restaurantName}</div>
-                        <div className="text-xs text-muted-foreground">Table {h.table}</div>
-                      </div>
-                      <ArrowRight className="h-5 w-5 text-primary opacity-0 group-hover:opacity-100 transition-all translate-x-[-10px] group-hover:translate-x-0" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="pt-12">
-            <button 
-              onClick={() => switchView("owner")}
-              className="min-h-[44px] px-5 py-3 rounded-xl text-xs font-bold text-muted-foreground uppercase tracking-widest hover:text-primary hover:bg-primary/5 transition-all border border-transparent hover:border-primary/10"
-            >
-              Are you a Pharmacy Owner?
-            </button>
-          </div>
-        </main>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen flex flex-col scroll-smooth">

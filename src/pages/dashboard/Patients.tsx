@@ -11,6 +11,7 @@ import { DashboardLayout } from "@/components/DashboardLayout";
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
 import { WifiOff } from "lucide-react";
 import { CardGridSkeleton } from "@/components/LoadingState";
+import { useTelegramAlerts } from "@/lib/useTelegramAlerts";
 
 type Patient = {
   id: string;
@@ -30,6 +31,7 @@ export default function Patients() {
   const isOffline = useOfflineStatus();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const { sendAlert } = useTelegramAlerts();
 
   useEffect(() => {
     if (!restaurant?.id) return;
@@ -107,6 +109,13 @@ export default function Patients() {
       // Update Dexie and local state
       await db.patients.update(selectedPatient.id, updatedData as any);
       setPatients(patients.map(p => p.id === selectedPatient.id ? { ...p, ...updatedData } : p));
+      
+      sendAlert(
+        "🏥 Patient Profile Updated",
+        `Name: ${name}\nPhone: ${phone}`,
+        "major_events"
+      );
+
       toast.success(navigator.onLine ? "Patient updated successfully" : "Saved offline — will sync when connected");
       setOpenModal(false);
     } else {
@@ -143,6 +152,13 @@ export default function Patients() {
         setPatients([payload as unknown as Patient, ...patients]);
         toast.success("Patient saved offline — will sync when connected");
       }
+
+      sendAlert(
+        "🏥 New Patient Added",
+        `Name: ${name}\nPhone: ${phone}`,
+        "major_events"
+      );
+
       setOpenModal(false);
     }
     setSaving(false);

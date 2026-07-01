@@ -57,6 +57,24 @@ serve(async (req) => {
     // Use the PharmIQBot (Assistant) token
     const botToken = "8890384452:AAEkKSGm4U-s9b6qGON9QqikvjoQrcI17FI";
 
+    // Add a persistent menu to every notification
+    const MAIN_MENU = {
+      inline_keyboard: [
+        [
+          { text: "📊 Today's Sales", callback_data: "sales:today" },
+          { text: "📅 This Week", callback_data: "sales:week" },
+        ],
+        [
+          { text: "📦 Stock Alerts", callback_data: "stock:low" },
+          { text: "📈 Operations", callback_data: "ops:summary" },
+        ],
+        [
+          { text: "🏆 Top Products", callback_data: "top:products" },
+          { text: "🔍 Dashboard", callback_data: "dash:overview" },
+        ],
+      ],
+    };
+
     // Send the message
     const telegramRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST',
@@ -64,7 +82,8 @@ serve(async (req) => {
       body: JSON.stringify({
         chat_id: restaurant.telegram_chat_id,
         text: message,
-        parse_mode: 'HTML'
+        parse_mode: 'HTML',
+        reply_markup: MAIN_MENU
       })
     });
 

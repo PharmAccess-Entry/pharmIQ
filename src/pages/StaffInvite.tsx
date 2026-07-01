@@ -84,8 +84,7 @@ const StaffInvite = () => {
 
     // Step 2: Now that user is authenticated, assign the role via RPC
     const { data, error } = await supabase.rpc("redeem_staff_invite", {
-      p_token: token,
-      p_email: info.email,
+      _token: token,
     });
     setSubmitting(false);
 

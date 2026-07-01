@@ -191,8 +191,10 @@ export const RestaurantProvider = ({ children }: { children: ReactNode }) => {
           } catch (e) {}
         }
 
-        // 3. Auto-create if no role and no restaurant (ONLY IF ONLINE)
-        if (navigator.onLine) {
+        // 3. Auto-create ONLY for brand new owners, NOT for staff accepting an invite
+        // If we're on the invite page, skip creation — the role will be assigned shortly
+        const isInvitePage = window.location.pathname.startsWith('/invite');
+        if (navigator.onLine && !isInvitePage) {
           const meta = (user.user_metadata as any) || {};
           const { data: created, error: createErr } = await supabase
             .from("restaurants")

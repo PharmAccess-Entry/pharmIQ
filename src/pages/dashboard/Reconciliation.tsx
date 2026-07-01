@@ -8,14 +8,16 @@ import { toast } from "sonner";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ListChecks, AlertTriangle, CheckCircle2, TrendingDown, WifiOff } from "lucide-react";
+import { ListChecks, AlertTriangle, CheckCircle2, TrendingDown, TrendingUp, WifiOff } from "lucide-react";
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
 import { CardGridSkeleton } from "@/components/LoadingState";
+import { useTelegramAlerts } from "@/lib/useTelegramAlerts";
 
 export default function Reconciliation() {
   const { restaurant, role } = useRestaurant();
   const { user } = useAuth();
   const rid = restaurant?.id;
+  const { sendAlert } = useTelegramAlerts();
 
   const [loading, setLoading] = useState(true);
   const [reconciliations, setReconciliations] = useState<any[]>([]);
@@ -61,7 +63,7 @@ export default function Reconciliation() {
       // 1. Fetch all product batches with stock
       const { data: batchData } = await supabase
         .from("product_batches")
-        .select("id, batch_number, stock_quantity, cost_price, menu_item_id, menu_items(id, name, price)")
+        .select("id, batch_number, stock_quantity, cost_price, menu_item_id, menu_items!inner(id, name, price)")
         .gt("stock_quantity", 0)
         .eq("menu_items.restaurant_id", rid)
         .order("expiry_date", { ascending: true });
@@ -108,6 +110,10 @@ export default function Reconciliation() {
   };
 
   const handleCountChange = (batchId: string, val: string) => {
+    if (val === "") {
+      setCounts(prev => ({ ...prev, [batchId]: "" as any }));
+      return;
+    }
     const num = parseInt(val);
     if (isNaN(num) || num < 0) return;
     setCounts(prev => ({ ...prev, [batchId]: num }));
@@ -139,14 +145,24 @@ export default function Reconciliation() {
       const virtualUpdates = [];       // unbatched menu_items (update menu_items directly)
       const menuIdToVariance: Record<string, number> = {};
 
+      let totalLoss = 0;
+      let totalOverage = 0;
+      let itemsAffected = 0;
+
       for (const batch of batches) {
         const expected = batch.stock_quantity;
-        const actual = counts[batch.id];
+        const actual = Number(counts[batch.id]) || 0;
         const variance = actual - expected;
 
         if (variance !== 0) {
           const costLoss = (variance < 0 ? Math.abs(variance) : 0) * (batch.cost_price || 0);
           const revenueLoss = (variance < 0 ? Math.abs(variance) : 0) * (batch.menu_items?.price || 0);
+          const costGain = (variance > 0 ? variance : 0) * (batch.cost_price || 0);
+          const revenueGain = (variance > 0 ? variance : 0) * (batch.menu_items?.price || 0);
+
+          totalLoss += costLoss;
+          totalOverage += costGain;
+          itemsAffected++;
 
           itemsToInsert.push({
             reconciliation_id: session.id,
@@ -157,7 +173,9 @@ export default function Reconciliation() {
             actual_qty: actual,
             variance: variance,
             cost_loss: costLoss,
-            revenue_loss: revenueLoss
+            revenue_loss: revenueLoss,
+            cost_gain: costGain,
+            revenue_gain: revenueGain
           });
 
           if (batch._isVirtual) {
@@ -174,21 +192,24 @@ export default function Reconciliation() {
 
       if (itemsToInsert.length > 0) {
         // Insert item logs
-        await supabase.from("stock_reconciliation_items").insert(itemsToInsert);
+        const { error: insertErr } = await supabase.from("stock_reconciliation_items").insert(itemsToInsert);
+        if (insertErr) throw insertErr;
         
         // Update real product_batches
         for (const update of batchUpdates) {
-          await supabase.from("product_batches").update({ stock_quantity: update.stock_quantity }).eq("id", update.id);
+          const { error: batchErr } = await supabase.from("product_batches").update({ stock_quantity: update.stock_quantity }).eq("id", update.id);
+          if (batchErr) throw batchErr;
         }
 
         // Update unbatched menu_items directly
         for (const update of virtualUpdates) {
-          await supabase.from("menu_items").update({ stock_quantity: update.newQty }).eq("id", update.menuItemId);
+          const { error: menuErr } = await supabase.from("menu_items").update({ stock_quantity: update.newQty }).eq("id", update.menuItemId);
+          if (menuErr) throw menuErr;
         }
 
         // Apply variances to menu_items atomically and write to inventory_logs
         for (const [menuId, variance] of Object.entries(menuIdToVariance)) {
-          await supabase.rpc("update_stock_with_reason", {
+          const { error: rpcErr } = await supabase.rpc("update_stock_with_reason", {
             p_restaurant_id: rid,
             p_menu_item_id: menuId,
             p_change_qty: variance,
@@ -198,7 +219,22 @@ export default function Reconciliation() {
             p_reference_id: session.id,
             p_reference_type: "reconciliation",
           });
+          if (rpcErr) throw rpcErr;
         }
+      }
+
+      if (itemsAffected > 0) {
+        sendAlert(
+          "⚖️ Stock Reconciliation Completed",
+          `Items Affected: ${itemsAffected}\nTotal Cost Loss: ${formatNaira(totalLoss)}\nTotal Cost Overage: ${formatNaira(totalOverage)}`,
+          "reconciliation"
+        );
+      } else {
+        sendAlert(
+          "⚖️ Stock Reconciliation Completed",
+          `Items Affected: 0 (Perfect count!)\nTotal Cost Loss: ₦0\nTotal Cost Overage: ₦0`,
+          "reconciliation"
+        );
       }
 
       toast.success("Stock reconciliation completed");
@@ -275,16 +311,20 @@ export default function Reconciliation() {
                     <th className="px-5 py-3">Expected Qty</th>
                     <th className="px-5 py-3">Actual Qty</th>
                     <th className="px-5 py-3">Variance</th>
-                    <th className="px-5 py-3">Loss Estimate</th>
+                    <th className="px-5 py-3">Status</th>
+                    <th className="px-5 py-3">Final Impact</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {batches.map(b => {
                     const expected = b.stock_quantity;
-                    const actual = counts[b.id];
-                    const variance = actual - expected;
+                    const rawActual = counts[b.id];
+                    const actualNum = Number(rawActual) || 0;
+                    const variance = actualNum - expected;
                     const isLoss = variance < 0;
+                    const isOverage = variance > 0;
                     const lossAmount = isLoss ? Math.abs(variance) * (b.cost_price || 0) : 0;
+                    const gainAmount = isOverage ? variance * (b.cost_price || 0) : 0;
                     
                     return (
                       <tr key={b.id}>
@@ -295,7 +335,7 @@ export default function Reconciliation() {
                           <Input 
                             type="number" 
                             className="w-24 text-center" 
-                            value={actual} 
+                            value={rawActual !== undefined ? rawActual : expected} 
                             onChange={e => handleCountChange(b.id, e.target.value)} 
                           />
                         </td>
@@ -309,9 +349,22 @@ export default function Reconciliation() {
                           )}
                         </td>
                         <td className="px-5 py-3">
-                          {isLoss ? (
-                            <span className="text-destructive flex items-center gap-1"><TrendingDown className="h-4 w-4" /> {formatNaira(lossAmount)}</span>
-                          ) : "-"}
+                          {variance === 0 ? (
+                            <span className="text-muted-foreground font-semibold">Balanced</span>
+                          ) : isLoss ? (
+                            <span className="text-destructive font-semibold">Shortage</span>
+                          ) : (
+                            <span className="text-emerald-500 font-semibold">Overage</span>
+                          )}
+                        </td>
+                        <td className="px-5 py-3">
+                          {variance === 0 ? (
+                            <span className="text-muted-foreground font-semibold">0</span>
+                          ) : isLoss ? (
+                            <span className="text-destructive font-semibold flex items-center gap-1"><TrendingDown className="h-3 w-3" /> {formatNaira(lossAmount)} loss</span>
+                          ) : (
+                            <span className="text-emerald-500 font-semibold flex items-center gap-1"><TrendingUp className="h-3 w-3" /> {formatNaira(gainAmount)} stock gain</span>
+                          )}
                         </td>
                       </tr>
                     );
@@ -333,6 +386,7 @@ export default function Reconciliation() {
               reconciliations.map(rec => {
                 const totalItems = rec.stock_reconciliation_items?.length || 0;
                 const totalCostLoss = rec.stock_reconciliation_items?.reduce((sum: number, item: any) => sum + (item.cost_loss || 0), 0) || 0;
+                const totalCostGain = rec.stock_reconciliation_items?.reduce((sum: number, item: any) => sum + (item.cost_gain || 0), 0) || 0;
 
                 return (
                   <div key={rec.id} className="bg-card border border-border rounded-xl p-5 shadow-sm space-y-3">
@@ -349,7 +403,9 @@ export default function Reconciliation() {
                     </div>
                     <div className="text-sm space-y-1">
                       <p className="flex justify-between"><span>Items Affected:</span> <span className="font-bold">{totalItems}</span></p>
-                      <p className="flex justify-between"><span>Total Cost Loss:</span> <span className="text-destructive font-bold">{formatNaira(totalCostLoss)}</span></p>
+                      {totalCostLoss > 0 && <p className="flex justify-between"><span>Total Cost Loss:</span> <span className="text-destructive font-bold">{formatNaira(totalCostLoss)}</span></p>}
+                      {totalCostGain > 0 && <p className="flex justify-between"><span>Total Cost Overage:</span> <span className="text-emerald-500 font-bold">{formatNaira(totalCostGain)}</span></p>}
+                      {totalCostLoss === 0 && totalCostGain === 0 && <p className="flex justify-between"><span>Variance Cost:</span> <span className="font-bold text-muted-foreground">₦0</span></p>}
                     </div>
                     <Button variant="outline" className="w-full text-xs font-bold gap-2" onClick={() => setViewedReconciliation(rec)}>
                       <ListChecks className="h-4 w-4" /> View Details
@@ -381,7 +437,7 @@ export default function Reconciliation() {
               
               {/* Content */}
               <div className="p-6 overflow-y-auto print:p-0">
-                <div className="mb-6 grid grid-cols-2 gap-4 print:grid-cols-2">
+                <div className="mb-6 grid grid-cols-2 sm:grid-cols-3 gap-4 print:grid-cols-3">
                   <div className="p-3 bg-muted/50 rounded-lg">
                     <p className="text-xs text-muted-foreground">Status</p>
                     <p className="font-bold text-emerald-600 uppercase text-sm mt-1">{viewedReconciliation.status}</p>
@@ -390,6 +446,12 @@ export default function Reconciliation() {
                     <p className="text-xs text-muted-foreground">Total Cost Loss</p>
                     <p className="font-bold text-destructive text-sm mt-1">
                       {formatNaira(viewedReconciliation.stock_reconciliation_items?.reduce((s: number, i: any) => s + (i.cost_loss || 0), 0) || 0)}
+                    </p>
+                  </div>
+                  <div className="p-3 bg-muted/50 rounded-lg">
+                    <p className="text-xs text-muted-foreground">Total Cost Overage</p>
+                    <p className="font-bold text-emerald-500 text-sm mt-1">
+                      {formatNaira(viewedReconciliation.stock_reconciliation_items?.reduce((s: number, i: any) => s + (i.cost_gain || 0), 0) || 0)}
                     </p>
                   </div>
                 </div>
@@ -401,7 +463,8 @@ export default function Reconciliation() {
                       <th className="px-4 py-2">Expected</th>
                       <th className="px-4 py-2">Actual</th>
                       <th className="px-4 py-2">Variance</th>
-                      <th className="px-4 py-2 rounded-tr-lg">Loss Est.</th>
+                      <th className="px-4 py-2">Status</th>
+                      <th className="px-4 py-2 rounded-tr-lg">Final Impact</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -425,8 +488,21 @@ export default function Reconciliation() {
                           </td>
                           <td className="px-4 py-3">
                             {isLoss ? (
-                              <span className="text-destructive font-bold">{formatNaira(item.cost_loss || 0)}</span>
-                            ) : "-"}
+                              <span className="text-destructive font-semibold">Shortage</span>
+                            ) : item.variance > 0 ? (
+                              <span className="text-emerald-500 font-semibold">Overage</span>
+                            ) : (
+                              <span className="text-muted-foreground font-semibold">Balanced</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {isLoss ? (
+                              <span className="text-destructive font-semibold flex items-center gap-1"><TrendingDown className="h-3 w-3" /> {formatNaira(item.cost_loss || 0)} loss</span>
+                            ) : item.variance > 0 ? (
+                              <span className="text-emerald-500 font-semibold flex items-center gap-1"><TrendingUp className="h-3 w-3" /> {formatNaira(item.cost_gain || 0)} stock gain</span>
+                            ) : (
+                              <span className="text-muted-foreground font-semibold">0</span>
+                            )}
                           </td>
                         </tr>
                       );

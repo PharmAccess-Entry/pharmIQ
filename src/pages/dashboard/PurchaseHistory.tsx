@@ -13,12 +13,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { CustomDatePicker } from "@/components/ui/custom-date-picker";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import { PackageOpen, Plus, Search, ArrowRight, Truck, WifiOff } from "lucide-react";
+import { useTelegramAlerts } from "@/lib/useTelegramAlerts";
 
 
 export default function PurchaseHistory() {
   const { restaurant, role } = useRestaurant();
   const { user } = useAuth();
   const rid = restaurant?.id;
+  const { sendAlert } = useTelegramAlerts();
 
   const [receivings, setReceivings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -147,6 +149,15 @@ export default function PurchaseHistory() {
         p_reference_id: receiving.id,
         p_reference_type: "stock_receiving",
       });
+
+      const supplierName = suppliers.find(s => s.id === supplierId)?.name || "Unknown Supplier";
+      const itemName = menuItems.find(m => m.id === menuItemId)?.name || "Unknown Item";
+
+      sendAlert(
+        "🛒 Stock Received",
+        `Supplier: ${supplierName}\nProduct: ${itemName}\nQuantity: ${q}\nTotal Cost: ${formatNaira(q * cost)}`,
+        "major_events"
+      );
 
       toast.success("Stock received successfully!");
       setReceiveModalOpen(false);

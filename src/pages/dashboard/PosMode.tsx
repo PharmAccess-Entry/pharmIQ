@@ -11,12 +11,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import {
   Plus, Minus, Trash2, ShoppingCart, Printer, Download, X,
   Banknote, CreditCard, CheckCircle2, Search, UtensilsCrossed,
-  User, RotateCcw, Monitor, ChevronUp, Clock, LogOut, AlertCircle, Scan, Shield
+  User, RotateCcw, Monitor, ChevronUp, Clock, LogOut, AlertCircle, Scan, Shield, Check, ChevronsUpDown
 } from "lucide-react";
 import html2canvas from "html2canvas";
 import { DashboardLayout } from "@/components/DashboardLayout";
@@ -291,9 +292,77 @@ export default function PosMode() {
       }
 
       if (restaurant?.telegram_enabled) {
-        const variance = actualCashVal - (shiftExpected?.expected_cash || 0);
-        const emoji = variance < 0 ? "⚠️" : variance > 0 ? "💰" : "✅";
-        const msg = `🧾 <b>Shift Closed</b>\n\n👤 Cashier: ${user?.user_metadata?.full_name || user?.email || 'Unknown'}\n⏱ Duration: ${Math.floor((new Date().getTime() - new Date(activeShift.start_time).getTime()) / (1000 * 60 * 60))} hours\n\n💵 <b>Cash</b>\nExpected: ${formatCurrency(shiftExpected?.expected_cash || 0)}\nActual: ${formatCurrency(actualCashVal)}\nVariance: ${emoji} ${formatCurrency(variance)}\n\n💳 <b>POS</b>\nExpected: ${formatCurrency(shiftExpected?.expected_pos || 0)}\nActual: ${formatCurrency(actualPosVal)}\n\n🏦 <b>Transfers</b>\nExpected: ${formatCurrency(shiftExpected?.expected_transfers || 0)}\nActual: ${formatCurrency(actualTransfersVal)}${shiftNotes ? `\n\n📝 Notes: ${shiftNotes}` : ''}`;
+        const cashVariance = actualCashVal - (shiftExpected?.expected_cash || 0);
+        const posVariance = actualPosVal - (shiftExpected?.expected_pos || 0);
+        const transferVariance = actualTransfersVal - (shiftExpected?.expected_transfers || 0);
+        const totalVariance = cashVariance + posVariance + transferVariance;
+
+        const cashEmoji = cashVariance < 0 ? "⚠️" : cashVariance > 0 ? "💰" : "✅";
+        const posEmoji = posVariance < 0 ? "⚠️" : posVariance > 0 ? "💰" : "✅";
+        const transferEmoji = transferVariance < 0 ? "⚠️" : transferVariance > 0 ? "💰" : "✅";
+
+        const staffName = user?.user_metadata?.full_name ? `${user?.email} (${user?.user_metadata?.full_name})` : user?.email || 'This cashier';
+        const durationHrs = Math.floor((new Date().getTime() - new Date(activeShift.start_time).getTime()) / (1000 * 60 * 60));
+        const durationMins = Math.floor(((new Date().getTime() - new Date(activeShift.start_time).getTime()) / (1000 * 60)) % 60);
+        const durationStr = durationHrs > 0 ? `${durationHrs}h ${durationMins}m` : `${durationMins}m`;
+
+        // Build per-channel commentary
+        const channelComments: string[] = [];
+        if (cashVariance < 0) channelComments.push(`💵 Cash is short by ${formatCurrency(Math.abs(cashVariance))} — some cash may be unaccounted for.`);
+        else if (cashVariance > 0) channelComments.push(`💵 Cash has a surplus of ${formatCurrency(cashVariance)} — more cash was submitted than expected.`);
+        else channelComments.push(`💵 Cash is perfectly balanced.`);
+
+        if ((shiftExpected?.expected_pos || 0) > 0) {
+          if (posVariance < 0) channelComments.push(`💳 POS is short by ${formatCurrency(Math.abs(posVariance))}.`);
+          else if (posVariance > 0) channelComments.push(`💳 POS has a surplus of ${formatCurrency(posVariance)}.`);
+          else channelComments.push(`💳 POS is balanced.`);
+        }
+
+        if ((shiftExpected?.expected_transfers || 0) > 0) {
+          if (transferVariance < 0) channelComments.push(`🏦 Transfers are short by ${formatCurrency(Math.abs(transferVariance))}.`);
+          else if (transferVariance > 0) channelComments.push(`🏦 Transfers have a surplus of ${formatCurrency(transferVariance)}.`);
+          else channelComments.push(`🏦 Transfers are balanced.`);
+        }
+
+        // Overall verdict
+        let verdict = '';
+        if (totalVariance === 0) {
+          verdict = `✅ <b>Clean shift!</b> ${staffName} had no shortages or overages. All payment channels balanced perfectly. Well done! 🎉`;
+        } else if (totalVariance < 0) {
+          verdict = `⚠️ <b>Shortage detected.</b> ${staffName}'s shift has a total shortfall of <b>${formatCurrency(Math.abs(totalVariance))}</b>. This means the actual money collected is less than what sales records show. Please review and follow up with the cashier.`;
+        } else {
+          verdict = `💰 <b>Overage detected.</b> ${staffName}'s shift has a total surplus of <b>${formatCurrency(totalVariance)}</b>. More money was submitted than expected — this could be a recording error or a previous debt being repaid. Worth checking.`;
+        }
+
+        const msg = [
+          `🧾 <b>Shift Closed</b>`,
+          ``,
+          `👤 Cashier: ${staffName}`,
+          `⏱️ Duration: ${durationStr}`,
+          ``,
+          `💵 <b>Cash</b>`,
+          `Expected: ${formatCurrency(shiftExpected?.expected_cash || 0)}`,
+          `Actual: ${formatCurrency(actualCashVal)}`,
+          `Variance: ${cashEmoji} ${formatCurrency(cashVariance)}`,
+          ``,
+          `💳 <b>POS</b>`,
+          `Expected: ${formatCurrency(shiftExpected?.expected_pos || 0)}`,
+          `Actual: ${formatCurrency(actualPosVal)}`,
+          `Variance: ${posEmoji} ${formatCurrency(posVariance)}`,
+          ``,
+          `🏦 <b>Transfers</b>`,
+          `Expected: ${formatCurrency(shiftExpected?.expected_transfers || 0)}`,
+          `Actual: ${formatCurrency(actualTransfersVal)}`,
+          `Variance: ${transferEmoji} ${formatCurrency(transferVariance)}`,
+          shiftNotes ? `\n📝 Notes: ${shiftNotes}` : ``,
+          ``,
+          `━━━━━━━━━━━━━━━`,
+          `📋 <b>What This Means:</b>`,
+          ...channelComments.map(c => `  ${c}`),
+          ``,
+          verdict,
+        ].filter(l => l !== null).join('\n');
+
         
         if (isOffline) {
           await queueAction(restaurant.id, "TELEGRAM_NOTIFY", { restaurant_id: restaurant.id, message: msg });
@@ -337,6 +406,7 @@ export default function PosMode() {
   const [rxVerificationOpen, setRxVerificationOpen] = useState(false);
   const [pharmacistPin, setPharmacistPin] = useState("");
   const [patientId, setPatientId] = useState("");
+  const [patientPopoverOpen, setPatientPopoverOpen] = useState(false);
   const [barcodeBuffer, setBarcodeBuffer] = useState("");
   const [manualBarcode, setManualBarcode] = useState("");
   const barcodeTimeoutRef = useRef<any>(null);
@@ -864,19 +934,49 @@ export default function PosMode() {
           <span className="font-display font-bold text-lg text-primary">{formatNaira(total)}</span>
         </div>
         {isPharmacy && (
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 flex flex-col">
             <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1"><User className="w-3 h-3" /> Link Patient (optional)</label>
-            <Select value={patientId || "none"} onValueChange={(val) => setPatientId(val === "none" ? "" : val)}>
-              <SelectTrigger className="w-full h-8 text-xs">
-                <SelectValue placeholder="Walk-in / No patient" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Walk-in / No patient</SelectItem>
-                {patients.map(p => (
-                  <SelectItem key={p.id} value={p.id}>{p.name} — {p.phone}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Popover open={patientPopoverOpen} onOpenChange={setPatientPopoverOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" role="combobox" aria-expanded={patientPopoverOpen} className="w-full justify-between h-8 px-3 text-xs font-normal">
+                  <span className="truncate">{patientId && patientId !== "none" ? patients.find(p => p.id === patientId)?.name || "Walk-in / No patient" : "Walk-in / No patient"}</span>
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[300px] p-0" align="start">
+                <Command>
+                  <CommandInput placeholder="Search patient..." className="h-9 text-xs" />
+                  <CommandList>
+                    <CommandEmpty>No patient found.</CommandEmpty>
+                    <CommandGroup>
+                      <CommandItem
+                        value="Walk-in / No patient"
+                        onSelect={() => {
+                          setPatientId("");
+                          setPatientPopoverOpen(false);
+                        }}
+                      >
+                        <Check className={`mr-2 h-4 w-4 ${!patientId ? "opacity-100" : "opacity-0"}`} />
+                        Walk-in / No patient
+                      </CommandItem>
+                      {patients.map((p) => (
+                        <CommandItem
+                          key={p.id}
+                          value={p.name + " " + p.phone}
+                          onSelect={() => {
+                            setPatientId(p.id);
+                            setPatientPopoverOpen(false);
+                          }}
+                        >
+                          <Check className={`mr-2 h-4 w-4 ${patientId === p.id ? "opacity-100" : "opacity-0"}`} />
+                          {p.name} — {p.phone}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
           </div>
         )}
         <Button

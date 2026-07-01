@@ -29,8 +29,9 @@ serve(async (req) => {
       
       const targetHour = parseInt(timeStr.split(':')[0]);
       
-      const formatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', hour12: false });
-      const currentHour = parseInt(formatter.format(now));
+      // Get the current hour in the target timezone accurately (0-23)
+      const dateInTz = new Date(now.toLocaleString('en-US', { timeZone: tz }));
+      const currentHour = dateInTz.getHours();
 
       if (currentHour === targetHour) {
          const prefs = r.telegram_notify_prefs as Record<string, boolean>;

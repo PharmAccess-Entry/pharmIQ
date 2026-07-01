@@ -108,7 +108,8 @@ const DashSettings = () => {
     setTgPrefs(restaurant.telegram_notify_prefs || {
       daily_report: true, weekly_report: true, monthly_report: true,
       end_shift: true, low_stock: true, out_of_stock: true,
-      reconciliation: true, subscription: true, sync_status: true
+      reconciliation: true, subscription: true, sync_status: true,
+      major_events: true
     });
     setTgReportTime(restaurant.telegram_report_time || "22:00:00");
   }, [restaurant]);
@@ -803,7 +804,8 @@ const DashSettings = () => {
                        { key: 'low_stock', label: 'Low Stock Alerts', desc: 'When items fall below reorder level' },
                        { key: 'out_of_stock', label: 'Out of Stock', desc: 'When items reach zero inventory' },
                        { key: 'reconciliation', label: 'Reconciliation', desc: 'Inventory audit variance alerts' },
-                       { key: 'sync_status', label: 'Sync Issues', desc: 'Offline sync failure notifications' }
+                       { key: 'sync_status', label: 'Sync Issues', desc: 'Offline sync failure notifications' },
+                       { key: 'major_events', label: 'Major Events', desc: 'Alerts for new expenses, patients, and suppliers' }
                      ].map(pref => (
                        <div key={pref.key} className="flex items-start justify-between gap-3">
                          <div className="min-w-0">

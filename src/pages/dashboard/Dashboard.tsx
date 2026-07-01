@@ -25,8 +25,8 @@ type Order = {
   order_items?: { name: string; qty: number }[];
 };
 
-type Range = "today" | "7d" | "30d" | "1y";
-const RANGE_DAYS: Record<Range, number> = { today: 1, "7d": 7, "30d": 30, "1y": 365 };
+type Range = "today" | "this_week" | "7d" | "30d" | "1y";
+const RANGE_DAYS: Record<Range, number> = { today: 1, this_week: 7, "7d": 7, "30d": 30, "1y": 365 };
 
 const Dashboard = () => {
   const { restaurant, role } = useRestaurant();
@@ -394,9 +394,14 @@ const Dashboard = () => {
 
   // Chart data
   const chartData = useMemo(() => {
+    const now = new Date();
+    const currentDay = now.getDay();
+    const diffToMonday = currentDay === 0 ? 6 : currentDay - 1;
+    const daysSinceMonday = diffToMonday + 1;
+
     if (isEvent) {
       // Orders per day for events
-      const days = range === "today" ? 1 : RANGE_DAYS[range];
+      const days = range === "today" ? 1 : range === "this_week" ? daysSinceMonday : RANGE_DAYS[range];
       const buckets: { label: string; date: Date; orders: number }[] = [];
       const now = new Date();
       for (let i = days - 1; i >= 0; i--) {
@@ -410,7 +415,7 @@ const Dashboard = () => {
       });
       return buckets.map((b) => ({ name: b.label, Orders: b.orders }));
     }
-    const days = RANGE_DAYS[range];
+    const days = range === "this_week" ? daysSinceMonday : RANGE_DAYS[range];
     const buckets: { label: string; date: Date; revenue: number; orders: number }[] = [];
      if (range === "today") {
       // hourly buckets
@@ -618,14 +623,14 @@ const Dashboard = () => {
             <h2 className="font-display text-lg font-semibold">{isEvent ? "Orders over time" : "Sales over time"}</h2>
             <p className="text-xs text-muted-foreground">{isEvent ? "Successful orders only" : "Successful orders only"}</p>
           </div>
-          <div className="flex gap-1 bg-secondary rounded-full p-1">
-            {(["today", "7d", "30d", "1y"] as Range[]).map((r) => (
+          <div className="flex gap-1 bg-secondary rounded-full p-1 overflow-x-auto no-scrollbar">
+            {(["today", "this_week", "7d", "30d", "1y"] as Range[]).map((r) => (
               <button
                 key={r}
                 onClick={() => setRange(r)}
-                className={`px-3 py-1 rounded-full text-xs font-semibold transition-smooth ${range === r ? "bg-card text-primary shadow-soft" : "text-muted-foreground"}`}
+                className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-smooth ${range === r ? "bg-card text-primary shadow-soft" : "text-muted-foreground"}`}
               >
-                {r === "today" ? "Today" : r === "7d" ? "7 days" : r === "30d" ? "30 days" : "1 year"}
+                {r === "today" ? "Today" : r === "this_week" ? "This Week" : r === "7d" ? "Last 7 days" : r === "30d" ? "Last 30 days" : "1 year"}
               </button>
             ))}
           </div>

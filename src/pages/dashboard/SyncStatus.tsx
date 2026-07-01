@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { Navigate } from "react-router-dom";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { db, OfflineAction } from "@/lib/offline/db";
 import { useOfflineSync } from "@/lib/offline/useOfflineSync";
+import { useRestaurant } from "@/lib/restaurant";
 import { Button } from "@/components/ui/button";
 import { CloudOff, RefreshCw, CheckCircle2, RotateCcw, AlertTriangle, Database } from "lucide-react";
 import { format } from "date-fns";
@@ -11,9 +13,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function SyncStatus() {
+  const { role } = useRestaurant();
   const { isOnline, isSyncing, queueSize, lastSyncTime, triggerSync } = useOfflineSync();
   const [queue, setQueue] = useState<OfflineAction[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Staff guard — only owners and managers may view sync status
+  if (role !== null && role !== "owner" && role !== "manager") {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   const loadQueue = async () => {
     const items = await db.offline_queue.orderBy("created_at").reverse().toArray();

@@ -33,7 +33,7 @@ Deno.serve(async (req) => {
 
     const { data: restaurants, error } = await admin
       .from("restaurants")
-      .select("id, name, owner_id, subscription_status, subscription_expires_at, trial_ends_at")
+      .select("id, name, owner_id, subscription_status, subscription_expires_at, trial_ends_at, telegram_enabled, telegram_chat_id")
       .lte("subscription_expires_at", sixDaysFromNow.toISOString())
       .gte("subscription_expires_at", now.toISOString())
       .in("subscription_status", ["active", "trial"]);
@@ -70,6 +70,22 @@ Deno.serve(async (req) => {
           },
         },
       });
+
+      // Send telegram notification if enabled
+      if (r.telegram_enabled && r.telegram_chat_id) {
+        const typeStr = isSub ? "Subscription" : "Trial";
+        const urgency = daysLeft === 1 ? "🚨 <b>URGENT ACTION REQUIRED</b>" : "⚠️ <b>Action Required</b>";
+        const msg = `${urgency}\n\nYour PharmIQ ${typeStr} for <b>${r.name}</b> expires in <b>${daysLeft} day${daysLeft === 1 ? '' : 's'}</b>.\n\nPlease log in to your dashboard to renew your subscription so you don't lose access.`;
+        
+        await admin.functions.invoke("telegram-notify", {
+          body: {
+            restaurant_id: r.id,
+            message: msg,
+            event_type: "subscription"
+          }
+        }).catch(console.error);
+      }
+
       sentCount++;
     }
 

@@ -79,7 +79,7 @@ export const DashboardLayout = ({ children }: { children: ReactNode }) => {
     return () => clearInterval(interval);
   }, [refresh]);
 
-  const STAFF_HIDDEN_PATHS = ["/dashboard/settings", "/dashboard/analytics", "/dashboard/menu", "/dashboard/qr", "/dashboard/events", "/dashboard/notifications", "/dashboard/inventory", "/dashboard/suppliers", "/dashboard/purchases", "/dashboard/expenses", "/dashboard/audit", "/dashboard/reports", "/dashboard/reconciliation"];
+  const STAFF_HIDDEN_PATHS = ["/dashboard/settings", "/dashboard/analytics", "/dashboard/menu", "/dashboard/qr", "/dashboard/events", "/dashboard/notifications", "/dashboard/inventory", "/dashboard/suppliers", "/dashboard/purchases", "/dashboard/expenses", "/dashboard/audit", "/dashboard/reports", "/dashboard/reconciliation", "/dashboard/shifts", "/dashboard/sync"];
   const MANAGER_HIDDEN_PATHS = ["/dashboard/settings", "/dashboard/audit"];
   
   const filterNav = (navItems: any[]) => {
@@ -88,16 +88,16 @@ export const DashboardLayout = ({ children }: { children: ReactNode }) => {
         return {
           ...item,
           subItems: item.subItems.filter((sub: any) => {
-            if (role === 'staff' && STAFF_HIDDEN_PATHS.includes(sub.to)) return false;
             if (role === 'manager' && MANAGER_HIDDEN_PATHS.includes(sub.to)) return false;
+            if (role !== 'owner' && role !== 'manager' && STAFF_HIDDEN_PATHS.includes(sub.to)) return false;
             return true;
           })
         };
       }
       return item;
     }).filter(item => {
-      if (role === 'staff' && STAFF_HIDDEN_PATHS.includes(item.to)) return false;
       if (role === 'manager' && MANAGER_HIDDEN_PATHS.includes(item.to)) return false;
+      if (role !== 'owner' && role !== 'manager' && STAFF_HIDDEN_PATHS.includes(item.to)) return false;
       return true;
     });
   };

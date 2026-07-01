@@ -43,7 +43,7 @@ const PAGE_SIZE = 30;
 const Orders = () => {
   const [tab, setTab] = useState<Tab>("completed");
   const [orders, setOrders] = useState<Order[]>([]);
-  const [exportRange, setExportRange] = useState<"today" | "7d" | "30d" | "all" | "custom">("today");
+  const [exportRange, setExportRange] = useState<"today" | "this_week" | "7d" | "30d" | "all" | "custom">("today");
   const [startDate, setStartDate] = useState<string>(new Date().toISOString().split("T")[0]);
   const [endDate, setEndDate] = useState<string>(new Date().toISOString().split("T")[0]);
   const [confirmServed, setConfirmServed] = useState<string | null>(null);
@@ -72,6 +72,11 @@ const Orders = () => {
 
     if (exportRange === "today") {
       from = new Date(); from.setHours(0, 0, 0, 0);
+    } else if (exportRange === "this_week") {
+      const currentDay = now.getDay();
+      const diffToMonday = currentDay === 0 ? 6 : currentDay - 1;
+      from = new Date(now.getTime() - diffToMonday * 86400_000);
+      from.setHours(0, 0, 0, 0);
     } else if (exportRange === "7d") {
       from = new Date(now.getTime() - 7 * 86400_000);
     } else if (exportRange === "30d") {
@@ -354,7 +359,7 @@ const Orders = () => {
     return (data || []) as any[];
   };
 
-  const rangeLabel = exportRange === "today" ? "Today" : exportRange === "7d" ? "Last 7 days" : exportRange === "30d" ? "Last 30 days" : exportRange === "custom" ? "Custom range" : "All time";
+  const rangeLabel = exportRange === "today" ? "Today" : exportRange === "this_week" ? "This Week" : exportRange === "7d" ? "Last 7 days" : exportRange === "30d" ? "Last 30 days" : exportRange === "custom" ? "Custom range" : "All time";
 
   const onExportCSV = async () => {
     setIsExporting(true);
@@ -418,6 +423,7 @@ const Orders = () => {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="today">Today</SelectItem>
+                <SelectItem value="this_week">This Week</SelectItem>
                 <SelectItem value="7d">Last 7 Days</SelectItem>
                 <SelectItem value="30d">Last 30 Days</SelectItem>
                 <SelectItem value="custom">Custom</SelectItem>

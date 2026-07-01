@@ -16,6 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { CustomDatePicker } from "@/components/ui/custom-date-picker";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
+import { useTelegramAlerts } from "@/lib/useTelegramAlerts";
 import { WifiOff } from "lucide-react";
 
 type MenuItem = {
@@ -41,6 +42,7 @@ const Inventory = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const isOffline = useOfflineStatus();
+  const { sendAlert } = useTelegramAlerts();
 
   // Restock modal state
   const [restockModalOpen, setRestockModalOpen] = useState(false);
@@ -131,54 +133,67 @@ const Inventory = () => {
   const handleRestock = async () => {
     if (!selectedItem || !rid) return;
     const qty = parseInt(adjustQty);
-    if (isNaN(qty) && adjustQty !== "") {
-      toast.error("Enter a valid quantity");
-      return;
-    }
     const actualQty = isNaN(qty) ? 0 : qty;
-    if (actualQty === 0) {
-      toast.error("Enter a non-zero quantity to adjust");
-      return;
-    }
 
     const parsedThreshold = parseInt(newThreshold);
     const finalThreshold = isNaN(parsedThreshold) || parsedThreshold < 0 ? selectedItem.low_stock_threshold : parsedThreshold;
 
-    setIsRestocking(true);
-
-    // Use the atomic RPC that updates stock AND writes inventory_logs in one transaction.
-    // This prevents double-logging with the DB trigger.
-    const { error: rpcError } = await supabase.rpc("update_stock_with_reason", {
-      p_restaurant_id: rid,
-      p_menu_item_id: selectedItem.id,
-      p_change_qty: actualQty,
-      p_reason: adjustmentReason,
-      p_movement_type: "adjustment",
-      p_note: adjustmentNote || null,
-      p_reference_id: null,
-      p_reference_type: null,
-    });
-
-    if (rpcError) {
-      toast.error("Failed to update stock: " + rpcError.message);
-      setIsRestocking(false);
+    // Allow threshold-only saves (no stock change required)
+    const thresholdChanged = finalThreshold !== selectedItem.low_stock_threshold;
+    if (actualQty === 0 && !thresholdChanged) {
+      toast.info("No changes to save.");
       return;
     }
 
-    // Update the threshold separately (not part of stock change)
-    if (finalThreshold !== selectedItem.low_stock_threshold) {
-      await supabase.from("menu_items")
-        .update({ low_stock_threshold: finalThreshold })
-        .eq("id", selectedItem.id);
+    setIsRestocking(true);
+
+    // Only call the stock RPC if there is actually a quantity change
+    if (actualQty !== 0) {
+      const { error: rpcError } = await supabase.rpc("update_stock_with_reason", {
+        p_restaurant_id: rid,
+        p_menu_item_id: selectedItem.id,
+        p_change_qty: actualQty,
+        p_reason: adjustmentReason,
+        p_movement_type: "adjustment",
+        p_note: adjustmentNote || null,
+        p_reference_id: null,
+        p_reference_type: null,
+      });
+
+      if (rpcError) {
+        toast.error("Failed to update stock: " + rpcError.message);
+        setIsRestocking(false);
+        return;
+      }
     }
 
-    const newStock = Math.max(0, selectedItem.stock_quantity + actualQty);
-    toast.success("Stock updated successfully");
+    // Update the threshold separately if changed
+    if (thresholdChanged) {
+      const { error: tErr } = await supabase.from("menu_items")
+        .update({ low_stock_threshold: finalThreshold })
+        .eq("id", selectedItem.id);
+      if (tErr) {
+        toast.error("Failed to update threshold: " + tErr.message);
+        setIsRestocking(false);
+        return;
+      }
+    }
+
+    const newStock = actualQty !== 0 ? Math.max(0, selectedItem.stock_quantity + actualQty) : selectedItem.stock_quantity;
+    toast.success(actualQty !== 0 ? "Stock updated successfully" : "Alert threshold updated");
     setItems(prev => prev.map(i => i.id === selectedItem.id ? {
       ...i,
       stock_quantity: newStock,
       low_stock_threshold: finalThreshold,
     } : i));
+
+    if (actualQty !== 0) {
+      sendAlert(
+        "📦 Stock Adjusted",
+        `Product: ${selectedItem.name}\nQuantity Changed: ${actualQty > 0 ? "+" + actualQty : actualQty}\nNew Total: ${newStock}\nReason: ${adjustmentReason}`,
+        "major_events"
+      );
+    }
 
     setRestockModalOpen(false);
     setSelectedItem(null);
