@@ -12,6 +12,7 @@ import { useState, useEffect } from "react";
 import { Helmet } from "react-helmet-async";
 import { toast } from "sonner";
 import { sanitizeInput } from "@/lib/sanitize";
+import { getCurrencySymbol } from "@/lib/format";
 
 const WEB3FORMS_KEY = "2aefb05d-d497-4c17-a5c6-e742212509e5";
 
@@ -349,7 +350,7 @@ const PharmacyLanding = () => {
               </div>
             </div>
             <div className="mt-3 flex items-center justify-between text-xs font-semibold text-emerald-400">
-              <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" /> Variance: ₦0</span>
+              <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" /> Variance: ${getCurrencySymbol()}0</span>
               <span className="text-white/40">Clean shift ✓</span>
             </div>
           </div>
@@ -610,7 +611,7 @@ const PharmacyLanding = () => {
                     <div className="flex justify-between text-xs"><span className="text-muted-foreground">Expected Closing Cash</span><span className="font-bold">₦174,500</span></div>
                     <div className="flex justify-between text-xs border-t border-border pt-3">
                       <span className="font-black">Cash Variance</span>
-                      <span className="font-black text-emerald-600">₦0.00 ✓ Clean</span>
+                      <span className="font-black text-emerald-600">${getCurrencySymbol()}0.00 ✓ Clean</span>
                     </div>
                   </div>
                 </div>

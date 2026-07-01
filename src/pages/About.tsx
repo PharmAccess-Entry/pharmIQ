@@ -2,6 +2,7 @@ import { Helmet } from "react-helmet-async";
 import { PublicHeader, PublicFooter } from "@/components/PublicLayout";
 import { Link } from "react-router-dom";
 import { ArrowRight, Lightbulb, TrendingUp, Users, ExternalLink, CheckCircle2, Star } from "lucide-react";
+import { getCurrencySymbol } from "@/lib/format";
 
 const personSchema = {
   "@context": "https://schema.org",

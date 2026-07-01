@@ -12,6 +12,7 @@ import { ListChecks, AlertTriangle, CheckCircle2, TrendingDown, TrendingUp, Wifi
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
 import { CardGridSkeleton } from "@/components/LoadingState";
 import { useTelegramAlerts } from "@/lib/useTelegramAlerts";
+import { getCurrencySymbol } from "@/lib/format";
 
 export default function Reconciliation() {
   const { restaurant, role } = useRestaurant();
@@ -232,7 +233,7 @@ export default function Reconciliation() {
       } else {
         sendAlert(
           "⚖️ Stock Reconciliation Completed",
-          `Items Affected: 0 (Perfect count!)\nTotal Cost Loss: ₦0\nTotal Cost Overage: ₦0`,
+          `Items Affected: 0 (Perfect count!)\nTotal Cost Loss: ${getCurrencySymbol()}0\nTotal Cost Overage: ${getCurrencySymbol()}0`,
           "reconciliation"
         );
       }
@@ -405,7 +406,7 @@ export default function Reconciliation() {
                       <p className="flex justify-between"><span>Items Affected:</span> <span className="font-bold">{totalItems}</span></p>
                       {totalCostLoss > 0 && <p className="flex justify-between"><span>Total Cost Loss:</span> <span className="text-destructive font-bold">{formatNaira(totalCostLoss)}</span></p>}
                       {totalCostGain > 0 && <p className="flex justify-between"><span>Total Cost Overage:</span> <span className="text-emerald-500 font-bold">{formatNaira(totalCostGain)}</span></p>}
-                      {totalCostLoss === 0 && totalCostGain === 0 && <p className="flex justify-between"><span>Variance Cost:</span> <span className="font-bold text-muted-foreground">₦0</span></p>}
+                      {totalCostLoss === 0 && totalCostGain === 0 && <p className="flex justify-between"><span>Variance Cost:</span> <span className="font-bold text-muted-foreground">{getCurrencySymbol()}0</span></p>}
                     </div>
                     <Button variant="outline" className="w-full text-xs font-bold gap-2" onClick={() => setViewedReconciliation(rec)}>
                       <ListChecks className="h-4 w-4" /> View Details

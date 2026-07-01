@@ -25,6 +25,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { MenuImportModal } from "@/components/MenuImportModal";
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
 import { WifiOff } from "lucide-react";
+import { getCurrencySymbol } from "@/lib/format";
 
 type MenuItem = {
   id: string;
@@ -830,7 +831,7 @@ const MenuManagement = () => {
               {!isEvent && (
                 <>
                   <div>
-                    <Label>Price (₦) {!/soup|stew|sauce/i.test(form.category) && "*"}</Label>
+                    <Label>Price ({getCurrencySymbol()}) {!/soup|stew|sauce/i.test(form.category) && "*"}</Label>
                     <div className="relative">
                         <CurrencyInput 
                           value={form.price} 
@@ -844,7 +845,7 @@ const MenuManagement = () => {
                     </div>
                   </div>
                   <div>
-                    <Label>Cost Price (₦)</Label>
+                    <Label>Cost Price ({getCurrencySymbol()})</Label>
                     <div className="relative">
                         <CurrencyInput 
                           value={form.cost_price} 

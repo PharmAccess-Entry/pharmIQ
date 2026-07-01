@@ -10,6 +10,7 @@ import {
   ChevronRight, Sparkles, MapPin, Coffee, Flame, Heart
 } from "lucide-react";
 import { toast } from "sonner";
+import { getCurrencySymbol } from "@/lib/format";
 
 type DemoMenuItem = {
   id: string;
@@ -416,7 +417,7 @@ export const QrDemo = () => {
                             <p className="text-[10px] text-slate-400 line-clamp-2 mt-1 leading-relaxed">{item.description}</p>
                           </div>
                           <div className="flex items-center justify-between mt-1">
-                            <span className="font-extrabold text-xs text-rose-400">₦{item.price.toLocaleString()}</span>
+                            <span className="font-extrabold text-xs text-rose-400">{getCurrencySymbol()}{item.price.toLocaleString()}</span>
                             <div className="h-6 w-6 rounded-md bg-rose-500 text-white grid place-items-center shadow-sm">
                               <Plus className="h-3 w-3 stroke-[3]" />
                             </div>
@@ -445,7 +446,7 @@ export const QrDemo = () => {
                     </div>
                     <div>
                       <div className="text-[10px] text-slate-400 leading-none">Tray Total</div>
-                      <div className="text-xs font-black text-rose-400 mt-1">₦{totalNaira.toLocaleString()}</div>
+                      <div className="text-xs font-black text-rose-400 mt-1">{getCurrencySymbol()}{totalNaira.toLocaleString()}</div>
                     </div>
                   </div>
                   <Button 
@@ -568,12 +569,12 @@ export const QrDemo = () => {
                             <div className="text-[9px] text-slate-400 italic mt-0.5">Note: "{item.notes}"</div>
                           )}
                         </div>
-                        <span className="font-extrabold text-[10px]">₦{(item.price * item.qty).toLocaleString()}</span>
+                        <span className="font-extrabold text-[10px]">{getCurrencySymbol()}{(item.price * item.qty).toLocaleString()}</span>
                       </div>
                     ))}
                     <div className="flex justify-between items-center pt-2 border-t border-slate-800 font-bold text-xs">
                       <span>Total Price</span>
-                      <span className="text-rose-400 font-black">₦{totalNaira.toLocaleString()}</span>
+                      <span className="text-rose-400 font-black">{getCurrencySymbol()}{totalNaira.toLocaleString()}</span>
                     </div>
                   </div>
                 </div>
@@ -688,7 +689,7 @@ export const QrDemo = () => {
                 <div className="p-4 border-t border-slate-800 flex items-center justify-between bg-slate-900/50">
                   <div>
                     <div className="text-[9px] text-slate-400">Subtotal</div>
-                    <div className="font-black text-rose-400 text-sm">₦{(activeItem.price * itemQty).toLocaleString()}</div>
+                    <div className="font-black text-rose-400 text-sm">{getCurrencySymbol()}{(activeItem.price * itemQty).toLocaleString()}</div>
                   </div>
                   <Button 
                     className="bg-rose-500 hover:bg-rose-600 text-white font-black text-xs rounded-xl h-10 px-5 shadow-lg shadow-rose-500/20"
@@ -773,7 +774,7 @@ export const QrDemo = () => {
                           </div>
                           
                           <div className="flex items-center justify-between mt-2">
-                            <span className="font-black text-rose-400 text-xs">₦{(item.price * item.qty).toLocaleString()}</span>
+                            <span className="font-black text-rose-400 text-xs">{getCurrencySymbol()}{(item.price * item.qty).toLocaleString()}</span>
                             
                             <div className="flex items-center gap-2">
                               <button 
@@ -801,7 +802,7 @@ export const QrDemo = () => {
                 <div className="p-4 border-t border-slate-800 space-y-3 bg-slate-900/50">
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-slate-400">Total Price</span>
-                    <span className="font-black text-rose-400 text-base">₦{totalNaira.toLocaleString()}</span>
+                    <span className="font-black text-rose-400 text-base">{getCurrencySymbol()}{totalNaira.toLocaleString()}</span>
                   </div>
                   <Button 
                     className="w-full bg-rose-500 hover:bg-rose-600 text-white font-black text-xs rounded-xl h-11 shadow-lg shadow-rose-500/20 gap-2"

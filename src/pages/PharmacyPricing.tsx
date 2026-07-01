@@ -6,6 +6,7 @@ import { Helmet } from "react-helmet-async";
 import { formatNaira } from "@/lib/format";
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
+import { getCurrencySymbol } from "@/lib/format";
 
 type Cycle = "monthly" | "yearly";
 
@@ -238,7 +239,7 @@ const Pricing = () => {
         <div className="container max-w-4xl mx-auto px-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
             {[
-              { value: "₦0", label: "Setup fee" },
+              { value: "${getCurrencySymbol()}0", label: "Setup fee" },
               { value: "3-Day", label: "Free trial" },
               { value: "0%", label: "Commission on sales" },
               { value: "Cancel", label: "Anytime, no lock-in" },

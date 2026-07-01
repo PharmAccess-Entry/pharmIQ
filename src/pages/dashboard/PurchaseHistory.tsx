@@ -14,6 +14,7 @@ import { CustomDatePicker } from "@/components/ui/custom-date-picker";
 import { CurrencyInput } from "@/components/ui/currency-input";
 import { PackageOpen, Plus, Search, ArrowRight, Truck, WifiOff } from "lucide-react";
 import { useTelegramAlerts } from "@/lib/useTelegramAlerts";
+import { getCurrencySymbol } from "@/lib/format";
 
 
 export default function PurchaseHistory() {
@@ -341,7 +342,7 @@ export default function PurchaseHistory() {
                 <CurrencyInput required value={qty} onChange={setQty} placeholder="0" className="w-full h-10" />
               </div>
               <div className="space-y-1.5">
-                <label className="text-xs font-bold uppercase text-muted-foreground">Unit Cost (₦) *</label>
+                <label className="text-xs font-bold uppercase text-muted-foreground">Unit Cost ({getCurrencySymbol()}) *</label>
                 <CurrencyInput required value={costPrice} onChange={setCostPrice} placeholder="0" className="w-full h-10" />
               </div>
             </div>

@@ -29,6 +29,7 @@ import { validateStockChange } from "@/lib/validations/stock";
 import { useOfflineQueue } from "@/lib/offline/useOfflineQueue";
 import { db } from "@/lib/offline/db";
 import { v4 as uuidv4 } from "uuid";
+import { getCurrencySymbol } from "@/lib/format";
 
 type MenuItem = {
   id: string;
@@ -219,7 +220,7 @@ export default function PosMode() {
       setStartCashStr("0");
       setStartPosStr("0");
       setStartTransferStr("0");
-      toast.info("Register was already settled. Balances set to ₦0.");
+      toast.info("Register was already settled. Balances set to ${getCurrencySymbol()}0.");
     } else {
       setStartCashStr(previousClosedShift.actual_cash ? Number(previousClosedShift.actual_cash).toLocaleString("en-US") : "0");
       setStartPosStr(previousClosedShift.actual_pos ? Number(previousClosedShift.actual_pos).toLocaleString("en-US") : "0");
@@ -1368,7 +1369,7 @@ export default function PosMode() {
               <Clock className="h-5 w-5 text-primary" /> Start Your Shift
             </DialogTitle>
             <DialogDescription>
-              Enter the opening balances you are starting with. You can default to ₦0 or use the previous shift's counts.
+              Enter the opening balances you are starting with. You can default to ${getCurrencySymbol()}0 or use the previous shift's counts.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -1389,7 +1390,7 @@ export default function PosMode() {
             )}
 
             <div>
-              <label className="text-sm font-medium block mb-1.5">Opening Cash Float (₦)</label>
+              <label className="text-sm font-medium block mb-1.5">Opening Cash Float ({getCurrencySymbol()})</label>
               <Input
                 type="text"
                 inputMode="numeric"
@@ -1401,7 +1402,7 @@ export default function PosMode() {
               />
             </div>
             <div>
-              <label className="text-sm font-medium block mb-1.5">Opening POS (₦)</label>
+              <label className="text-sm font-medium block mb-1.5">Opening POS ({getCurrencySymbol()})</label>
               <Input
                 type="text"
                 inputMode="numeric"
@@ -1412,7 +1413,7 @@ export default function PosMode() {
               />
             </div>
             <div>
-              <label className="text-sm font-medium block mb-1.5">Opening Bank Transfers (₦)</label>
+              <label className="text-sm font-medium block mb-1.5">Opening Bank Transfers ({getCurrencySymbol()})</label>
               <Input
                 type="text"
                 inputMode="numeric"
@@ -1451,25 +1452,25 @@ export default function PosMode() {
               </div>
             )}
             <div>
-              <label className="text-sm font-medium block mb-1">Actual Cash in Drawer (₦)</label>
+              <label className="text-sm font-medium block mb-1">Actual Cash in Drawer ({getCurrencySymbol()})</label>
               <Input type="text" inputMode="numeric" placeholder="0" value={endCashStr}
                 onChange={(e) => handleCurrencyInput(e.target.value, setEndCashStr)} className="font-bold" />
               {shiftExpected && parseCurrency(endCashStr) !== shiftExpected.expected_cash && endCashStr !== "" && (
                 <p className={`text-xs mt-1 font-medium flex items-center gap-1 ${parseCurrency(endCashStr) < shiftExpected.expected_cash ? "text-destructive" : "text-amber-500"}`}>
                   <AlertCircle className="w-3 h-3" />
                   {parseCurrency(endCashStr) < shiftExpected.expected_cash
-                    ? `₦${formatNaira(shiftExpected.expected_cash - parseCurrency(endCashStr))} SHORT`
-                    : `₦${formatNaira(parseCurrency(endCashStr) - shiftExpected.expected_cash)} OVER`}
+                    ? `${getCurrencySymbol()}${formatNaira(shiftExpected.expected_cash - parseCurrency(endCashStr))} SHORT`
+                    : `${getCurrencySymbol()}${formatNaira(parseCurrency(endCashStr) - shiftExpected.expected_cash)} OVER`}
                 </p>
               )}
             </div>
             <div>
-              <label className="text-sm font-medium block mb-1">POS Terminal Total (₦)</label>
+              <label className="text-sm font-medium block mb-1">POS Terminal Total ({getCurrencySymbol()})</label>
               <Input type="text" inputMode="numeric" placeholder="0" value={endPosStr}
                 onChange={(e) => handleCurrencyInput(e.target.value, setEndPosStr)} className="font-bold" />
             </div>
             <div>
-              <label className="text-sm font-medium block mb-1">Bank Transfers Total (₦)</label>
+              <label className="text-sm font-medium block mb-1">Bank Transfers Total ({getCurrencySymbol()})</label>
               <Input type="text" inputMode="numeric" placeholder="0" value={endTransferStr}
                 onChange={(e) => handleCurrencyInput(e.target.value, setEndTransferStr)} className="font-bold" />
             </div>

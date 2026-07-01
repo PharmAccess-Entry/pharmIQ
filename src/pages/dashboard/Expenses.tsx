@@ -17,6 +17,7 @@ import { useOfflineStatus } from "@/lib/useOfflineStatus";
 import { WifiOff } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTelegramAlerts } from "@/lib/useTelegramAlerts";
+import { getCurrencySymbol } from "@/lib/format";
 
 type Expense = {
   id: string;
@@ -301,7 +302,7 @@ export default function Expenses() {
                 </Select>
               </div>
               <div>
-                <Label>Amount (₦)</Label>
+                <Label>Amount ({getCurrencySymbol()})</Label>
                 <CurrencyInput 
                   value={form.amount} 
                   onChange={(val) => setForm({...form, amount: val})}

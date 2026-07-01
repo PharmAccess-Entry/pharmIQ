@@ -1,5 +1,5 @@
 /** Reads the saved currency symbol from the restaurant cache. Falls back to ₦ for existing Nigerian users. */
-const getCurrencySymbol = (): string => {
+export const getCurrencySymbol = (): string => {
   try {
     const cached = localStorage.getItem("pharmiq_cached_restaurant");
     if (cached) {

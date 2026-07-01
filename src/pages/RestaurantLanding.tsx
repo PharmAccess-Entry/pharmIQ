@@ -11,6 +11,7 @@ import { useState, useEffect } from "react";
 import { Helmet } from "react-helmet-async";
 import { toast } from "sonner";
 import { sanitizeInput } from "@/lib/sanitize";
+import { getCurrencySymbol } from "@/lib/format";
 
 const WEB3FORMS_KEY = "2aefb05d-d497-4c17-a5c6-e742212509e5";
 

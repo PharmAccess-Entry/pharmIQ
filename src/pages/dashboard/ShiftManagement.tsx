@@ -20,6 +20,7 @@ import { format } from "date-fns";
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
 import { WifiOff } from "lucide-react";
 import { CardGridSkeleton, ListRowSkeleton } from "@/components/LoadingState";
+import { getCurrencySymbol } from "@/lib/format";
 
 export default function ShiftManagement() {
   const { restaurant, role } = useRestaurant();
@@ -659,16 +660,16 @@ export default function ShiftManagement() {
 
               <div className="grid gap-4">
                 <div className="grid gap-2">
-                  <Label>Actual Cash Counted (₦)</Label>
+                  <Label>Actual Cash Counted ({getCurrencySymbol()})</Label>
                   <Input type="number" value={actualCash} onChange={(e) => setActualCash(e.target.value)} />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="grid gap-2">
-                    <Label>Actual POS (₦)</Label>
+                    <Label>Actual POS ({getCurrencySymbol()})</Label>
                     <Input type="number" value={actualPos} onChange={(e) => setActualPos(e.target.value)} />
                   </div>
                   <div className="grid gap-2">
-                    <Label>Actual Transfers (₦)</Label>
+                    <Label>Actual Transfers ({getCurrencySymbol()})</Label>
                     <Input type="number" value={actualTransfers} onChange={(e) => setActualTransfers(e.target.value)} />
                   </div>
                 </div>

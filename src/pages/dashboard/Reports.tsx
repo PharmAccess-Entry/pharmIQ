@@ -11,6 +11,7 @@ import { FileText, Tags, Printer, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
 import { CardGridSkeleton } from "@/components/LoadingState";
+import { getCurrencySymbol } from "@/lib/format";
 
 export default function Reports() {
   const { restaurant } = useRestaurant();
@@ -70,8 +71,8 @@ export default function Reports() {
       { header: "Product Name", accessorKey: "name" },
       { header: "Category", accessorKey: "category" },
       { header: "Current Qty", accessorKey: "stock_quantity" },
-      { header: "Selling Price", cell: (r) => `₦${Number(r.price).toLocaleString()}` },
-      { header: "Total Value", cell: (r) => `₦${(Number(r.price) * Number(r.stock_quantity)).toLocaleString()}` }
+      { header: "Selling Price", cell: (r) => `${getCurrencySymbol()}${Number(r.price).toLocaleString()}` },
+      { header: "Total Value", cell: (r) => `${getCurrencySymbol()}${(Number(r.price) * Number(r.stock_quantity)).toLocaleString()}` }
     ],
     data: inventoryData
   };

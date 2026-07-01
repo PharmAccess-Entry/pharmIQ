@@ -20,6 +20,7 @@ import imageCompression from "browser-image-compression";
 import { useAuth } from "@/lib/auth";
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
 import { SUPPORTED_COUNTRIES, symbolForCode } from "@/lib/countryDetect";
+import { getCurrencySymbol } from "@/lib/format";
 
 // Pharmacy plan definitions (user limits)
 const PHARMACY_PLANS: Record<string, { users: number | null; label: string }> = {

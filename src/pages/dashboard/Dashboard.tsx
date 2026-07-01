@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { StatCardSkeleton, ChartSkeleton, OrderRowSkeleton } from "@/components/LoadingState";
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
 import { WifiOff } from "lucide-react";
+import { getCurrencySymbol } from "@/lib/format";
 
 type Order = {
   id: string;
@@ -640,7 +641,7 @@ const Dashboard = () => {
             <LineChart data={chartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
               <XAxis dataKey="name" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-              <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickFormatter={(v) => isEvent ? String(v) : (v >= 1000 ? `₦${(v / 1000).toFixed(0)}k` : `₦${v}`)} />
+              <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickFormatter={(v) => isEvent ? String(v) : (v >= 1000 ? `${getCurrencySymbol()}${(v / 1000).toFixed(0)}k` : `${getCurrencySymbol()}${v}`)} />
               <Tooltip
                 contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12 }}
                 formatter={(v: number, name: string) => name === "Revenue" ? formatNaira(v) : v}

@@ -18,6 +18,7 @@ import { CurrencyInput } from "@/components/ui/currency-input";
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
 import { useTelegramAlerts } from "@/lib/useTelegramAlerts";
 import { WifiOff } from "lucide-react";
+import { getCurrencySymbol } from "@/lib/format";
 
 type MenuItem = {
   id: string;
@@ -320,7 +321,7 @@ const Inventory = () => {
     const catLabel = categoryFilter !== "all" ? `_${categoryFilter.toLowerCase().replace(/\s+/g, "-")}` : "";
     const filename = `inventory${stockLabel}${catLabel}_${new Date().toISOString().split('T')[0]}.csv`;
 
-    const headers = ["Name", "Category", "Price (₦)", "Tracked", "Stock Qty", "Low Stock Threshold", "Status", "Expiry Date"];
+    const headers = ["Name", "Category", "Price ({getCurrencySymbol()})", "Tracked", "Stock Qty", "Low Stock Threshold", "Status", "Expiry Date"];
     const rows = filteredItems.map(i => {
       const isTracked = i.track_inventory;
       const isOut = isTracked && i.stock_quantity <= 0;
@@ -890,7 +891,7 @@ const Inventory = () => {
                           <CurrencyInput value={line.quantity} onChange={(val) => setGrnLines(prev => prev.map((l, i) => i === idx ? { ...l, quantity: val } : l))} className="h-9" />
                         </div>
                         <div className="space-y-1.5">
-                          <Label className="text-xs">Cost/Unit (₦)</Label>
+                          <Label className="text-xs">Cost/Unit ({getCurrencySymbol()})</Label>
                           <CurrencyInput value={line.cost_price_per_unit} onChange={(val) => setGrnLines(prev => prev.map((l, i) => i === idx ? { ...l, cost_price_per_unit: val } : l))} placeholder="0" className="h-9" />
                         </div>
                         <div className="space-y-1.5">
@@ -913,7 +914,7 @@ const Inventory = () => {
                   <div className="bg-primary/5 border border-primary/20 rounded-xl p-3 text-sm">
                     <div className="font-semibold text-primary mb-1">Summary</div>
                     <div className="text-muted-foreground">Total lines: <span className="font-bold text-foreground">{grnLines.filter(l => l.menu_item_id).length}</span></div>
-                    <div className="text-muted-foreground">Est. total cost: <span className="font-bold text-foreground">₦{grnLines.reduce((sum, l) => sum + (parseFloat(l.cost_price_per_unit || "0") * parseInt(l.quantity || "0")), 0).toLocaleString("en-NG")}</span></div>
+                    <div className="text-muted-foreground">Est. total cost: <span className="font-bold text-foreground">{getCurrencySymbol()}{grnLines.reduce((sum, l) => sum + (parseFloat(l.cost_price_per_unit || "0") * parseInt(l.quantity || "0")), 0).toLocaleString("en-NG")}</span></div>
                   </div>
                 )}
               </div>

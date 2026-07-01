@@ -21,6 +21,7 @@ import { WifiOff } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { getCurrencySymbol } from "@/lib/format";
 
 export default function Analytics() {
   const { restaurant } = useRestaurant();
@@ -619,7 +620,7 @@ export default function Analytics() {
                         tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} 
                         tickLine={false} 
                         axisLine={false}
-                        tickFormatter={(v) => v >= 1000 ? `₦${(v / 1000).toFixed(0)}k` : `₦${v}`} 
+                        tickFormatter={(v) => v >= 1000 ? `${getCurrencySymbol()}${(v / 1000).toFixed(0)}k` : `${getCurrencySymbol()}${v}`} 
                       />
                       <Tooltip
                         contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, fontSize: 12 }}
