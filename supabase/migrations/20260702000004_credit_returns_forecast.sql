@@ -86,9 +86,9 @@ ADD COLUMN IF NOT EXISTS forecast_alert_threshold integer DEFAULT 7;
 CREATE OR REPLACE FUNCTION public.get_inventory_forecast(p_restaurant_id uuid)
 RETURNS TABLE (
     menu_item_id uuid,
-    name text,
+    item_name text,
     current_stock integer,
-    average_daily_sales numeric,
+    run_rate_7d numeric,
     estimated_days_remaining numeric
 ) AS $$
 BEGIN
@@ -118,9 +118,9 @@ BEGIN
     calculated_forecast AS (
         SELECT 
             v.menu_item_id,
-            m.name,
+            m.name as item_name,
             m.stock_quantity as current_stock,
-            (v.total_sold / v.active_days) as average_daily_sales
+            (v.total_sold / v.active_days) as run_rate_7d
         FROM item_velocity v
         JOIN public.menu_items m ON v.menu_item_id = m.id
         WHERE m.track_inventory = true 
@@ -129,10 +129,10 @@ BEGIN
     )
     SELECT 
         f.menu_item_id,
-        f.name,
+        f.item_name,
         f.current_stock,
-        ROUND(f.average_daily_sales::numeric, 2) as average_daily_sales,
-        ROUND((f.current_stock / f.average_daily_sales)::numeric, 1) as estimated_days_remaining
+        ROUND(f.run_rate_7d::numeric, 2) as run_rate_7d,
+        ROUND((f.current_stock / f.run_rate_7d)::numeric, 1) as estimated_days_remaining
     FROM calculated_forecast f
     ORDER BY estimated_days_remaining ASC;
 END;
