@@ -14,7 +14,7 @@ serve(async (req) => {
 
     const { data: restaurants, error } = await supabase
       .from('restaurants')
-      .select('id, name, currency_symbol, telegram_chat_id, telegram_enabled, telegram_report_time, telegram_report_timezone, telegram_notify_prefs')
+      .select('id, name, currency_symbol, telegram_chat_id, telegram_enabled, telegram_report_time, telegram_report_timezone, telegram_notify_prefs, forecast_alert_threshold')
       .eq('telegram_enabled', true)
       .not('telegram_chat_id', 'is', null);
 
@@ -48,6 +48,22 @@ serve(async (req) => {
          const aov = result.txCount > 0 ? result.revenue / result.txCount : 0;
          const sym = r.currency_symbol || '₦';
 
+         let forecastText = '';
+         const threshold = r.forecast_alert_threshold || 7;
+         const { data: forecastData } = await supabase.rpc("get_inventory_forecast", { p_restaurant_id: r.id });
+         if (forecastData && forecastData.length > 0) {
+           const lowStock = forecastData.filter((f: any) => f.estimated_days_remaining !== null && f.estimated_days_remaining <= threshold);
+           if (lowStock.length > 0) {
+             forecastText = `\n\n⚠️ <b>LOW STOCK ALERT (≤ ${threshold} days)</b>\n`;
+             lowStock.slice(0, 10).forEach((f: any) => {
+               forecastText += `• ${f.item_name}: ${f.current_stock} left (~${Number(f.estimated_days_remaining).toFixed(1)} days)\n`;
+             });
+             if (lowStock.length > 10) {
+               forecastText += `<i>...and ${lowStock.length - 10} more items. Check dashboard.</i>`;
+             }
+           }
+         }
+
          const text = [
           `📊 <b>Daily Automated Report — ${r.name}</b>`,
           `📅 ${formatDate(ymd)}`,
@@ -64,7 +80,7 @@ serve(async (req) => {
           `• Cash: ${sym}${fmt(result.cash)}`,
           `• POS: ${sym}${fmt(result.pos)}`,
           `• Transfers: ${sym}${fmt(result.transfer)}`,
-         ].join('\n');
+         ].join('\n') + forecastText;
 
          await sendMessage(r.telegram_chat_id, text);
          sentCount++;

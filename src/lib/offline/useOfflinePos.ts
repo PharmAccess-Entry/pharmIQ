@@ -108,8 +108,8 @@ export function useOfflinePos(restaurantId: string | undefined, userId: string |
       user_id: userId,
       short_code: shortCode,
       table_number: 'Walk-in',
-      status: paymentMethod === 'bank_transfer' ? 'served' : 'completed',
-      payment_status: paymentMethod === 'cash' ? 'cash_paid' : paymentMethod === 'bank_transfer' ? 'unpaid' : 'pos_paid',
+      status: (paymentMethod === 'bank_transfer' || paymentMethod === 'credit') ? 'served' : 'completed',
+      payment_status: paymentMethod === 'cash' ? 'cash_paid' : paymentMethod === 'bank_transfer' ? 'unpaid' : paymentMethod === 'credit' ? 'credit' : 'pos_paid',
       total,
       created_at: nowStr,
       customer_name: customerName,
@@ -139,6 +139,31 @@ export function useOfflinePos(restaurantId: string | undefined, userId: string |
             stock_quantity: localProduct.stock_quantity - item.qty
           });
         }
+      }
+    }
+
+    if (paymentMethod === 'credit' && patientId) {
+      const txPayload = {
+        id: uuidv4(),
+        restaurant_id: restaurantId,
+        patient_id: patientId,
+        amount: total,
+        transaction_type: 'credit_sale',
+        order_id: orderId,
+        created_by: userId,
+        notes: `Credit sale for order ${shortCode}`,
+        created_at: nowStr
+      };
+      
+      await queueAction(restaurantId, 'CREDIT_TRANSACTION_CREATE', txPayload);
+      await db.customer_transactions.add(txPayload);
+
+      // Optimistically update patient balance
+      const localPatient = await db.patients.get(patientId);
+      if (localPatient) {
+        await db.patients.update(patientId, {
+          balance_due: (localPatient.balance_due || 0) + total
+        });
       }
     }
 

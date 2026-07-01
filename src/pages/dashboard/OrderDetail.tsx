@@ -18,7 +18,7 @@ import { useOfflineStatus } from "@/lib/useOfflineStatus";
 import { WifiOff } from "lucide-react";
 
 type Order = any;
-type OrderItem = { id: string; name: string; qty: number; price: number; item_intent: string | null; selected_option: string | null; notes: string | null; bundle_id?: string | null };
+type OrderItem = { id: string; name: string; qty: number; returned_qty?: number; price: number; item_intent: string | null; selected_option: string | null; notes: string | null; bundle_id?: string | null; menu_item_id: string; };
 
 export const OrderDetail = () => {
   const { id } = useParams();
@@ -33,6 +33,11 @@ export const OrderDetail = () => {
   const [collectingPayment, setCollectingPayment] = useState(false);
   const [refundingOrder, setRefundingOrder] = useState(false);
   const [restockInventory, setRestockInventory] = useState(true);
+  
+  const [returnModalOpen, setReturnModalOpen] = useState(false);
+  const [returnItemsState, setReturnItemsState] = useState<{ id: string; returnQty: number; returnToStock: boolean }[]>([]);
+  const [returnReason, setReturnReason] = useState("");
+  const [returnMethod, setReturnMethod] = useState<"cash" | "pos" | "transfer" | "store_credit">("cash");
   
   const { role } = useRestaurant();
   
@@ -223,6 +228,94 @@ export const OrderDetail = () => {
     toast.success("Order refunded successfully" + (restockInventory ? " and inventory restocked." : "."));
   };
 
+  const openReturnModal = () => {
+    setReturnItemsState(items.filter(i => (i.qty - (i.returned_qty || 0)) > 0).map(i => ({
+      id: i.id,
+      returnQty: 0,
+      returnToStock: true
+    })));
+    setReturnReason("");
+    setReturnMethod("cash");
+    setReturnModalOpen(true);
+  };
+
+  const processReturnItems = async () => {
+    const toReturn = returnItemsState.filter(r => r.returnQty > 0);
+    if (toReturn.length === 0) {
+      toast.error("Please select at least one item to return.");
+      return;
+    }
+    if (!returnReason.trim()) {
+      toast.error("Please provide a reason for the return.");
+      return;
+    }
+
+    setRefundingOrder(true);
+    let activeShiftId: string | null = null;
+    const { data: { user } } = await supabase.auth.getUser();
+
+    if (navigator.onLine && user) {
+      try {
+        const { data: activeShift } = await supabase
+          .from("shifts")
+          .select("id")
+          .eq("restaurant_id", order.restaurant_id)
+          .eq("user_id", user.id)
+          .eq("status", "active")
+          .limit(1)
+          .maybeSingle();
+        activeShiftId = activeShift?.id || null;
+      } catch (_) {}
+    }
+
+    const payloadItems = toReturn.map(r => {
+      const item = items.find(i => i.id === r.id)!;
+      return {
+        order_item_id: item.id,
+        menu_item_id: item.menu_item_id,
+        qty: r.returnQty,
+        returned_to_stock: r.returnToStock,
+        cost_price: 0 // Will not be used here but required by type
+      };
+    });
+
+    const totalRefunded = toReturn.reduce((sum, r) => {
+      const item = items.find(i => i.id === r.id)!;
+      return sum + (item.price * r.returnQty);
+    }, 0);
+
+    const txPayload = {
+      p_restaurant_id: order.restaurant_id,
+      p_order_id: order.id,
+      p_staff_id: user?.id,
+      p_shift_id: activeShiftId,
+      p_refund_method: returnMethod,
+      p_total_refunded: totalRefunded,
+      p_reason: returnReason,
+      p_items: payloadItems,
+      p_created_at: new Date().toISOString()
+    };
+
+    if (navigator.onLine) {
+      const { error } = await supabase.rpc("process_return", txPayload);
+      if (error) {
+        toast.error("Return failed: " + error.message);
+        setRefundingOrder(false);
+        return;
+      }
+    } else {
+      const { db } = await import("@/lib/offline/db");
+      const { useOfflineQueue } = await import("@/lib/offline/useOfflineQueue");
+      const { queueAction } = useOfflineQueue();
+      await queueAction(order.restaurant_id, "RETURN_CREATE", txPayload);
+    }
+
+    toast.success("Return processed successfully.");
+    setReturnModalOpen(false);
+    setRefundingOrder(false);
+    // Reload UI state via realtime subscription or offline sync trigger
+  };
+
   const sendMessage = async () => {
     const body = chatBody.trim();
     if (!body) return;
@@ -375,6 +468,11 @@ export const OrderDetail = () => {
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 <StatusPill status={order.status} />
+                {(order.status === "completed" || order.status === "served") && items.some(i => (i.qty - (i.returned_qty || 0)) > 0) && (
+                  <Button variant="outline" size="sm" onClick={openReturnModal} className="border-red-500 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30">
+                    <AlertTriangle className="h-4 w-4 mr-1.5" /> Return Items
+                  </Button>
+                )}
               </div>
             </div>
 
@@ -645,6 +743,101 @@ export const OrderDetail = () => {
             <Button variant="outline" className="flex-1 h-12 rounded-xl font-bold" onClick={() => setRefundingOrder(false)}>Cancel</Button>
             <Button variant="hero" className="flex-1 h-12 rounded-xl font-bold bg-destructive hover:bg-destructive/90 text-white shadow-soft" onClick={processRefund}>
               Confirm Refund
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Return Items Modal */}
+      <Dialog open={returnModalOpen} onOpenChange={setReturnModalOpen}>
+        <DialogContent className="max-w-md rounded-[2rem] p-6 sm:p-8">
+          <DialogHeader className="text-center mb-4">
+            <DialogTitle className="font-display text-xl font-black uppercase text-red-600 tracking-wider">Return Items</DialogTitle>
+            <DialogDescription className="font-medium text-xs sm:text-sm">
+              Select items to return and specify the refund details.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 max-h-[40vh] overflow-y-auto pr-2 no-scrollbar">
+            {returnItemsState.map((r, i) => {
+              const item = items.find(it => it.id === r.id);
+              if (!item) return null;
+              const maxRet = item.qty - (item.returned_qty || 0);
+              return (
+                <div key={r.id} className="bg-secondary/30 p-3 rounded-xl border border-border flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-sm truncate">{item.name}</div>
+                    <div className="text-xs text-muted-foreground">{formatNaira(item.price)} each · Max: {maxRet}</div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button variant="outline" size="icon" className="h-8 w-8 rounded-lg" onClick={() => {
+                      const newArr = [...returnItemsState];
+                      newArr[i].returnQty = Math.max(0, newArr[i].returnQty - 1);
+                      setReturnItemsState(newArr);
+                    }}>
+                      <Minus className="h-3 w-3" />
+                    </Button>
+                    <div className="w-6 text-center font-bold text-sm">{r.returnQty}</div>
+                    <Button variant="outline" size="icon" className="h-8 w-8 rounded-lg" onClick={() => {
+                      const newArr = [...returnItemsState];
+                      newArr[i].returnQty = Math.min(maxRet, newArr[i].returnQty + 1);
+                      setReturnItemsState(newArr);
+                    }}>
+                      <Plus className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="mt-4 space-y-4">
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground block mb-1.5">Return Reason</label>
+              <input
+                type="text"
+                value={returnReason}
+                onChange={e => setReturnReason(e.target.value)}
+                placeholder="e.g. Expired, Customer changed mind..."
+                className="w-full h-10 px-3 rounded-xl border border-input bg-transparent text-sm font-medium focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+            
+            <div className="flex items-center gap-3 bg-secondary/20 p-3 rounded-xl border border-border/50">
+              <input 
+                type="checkbox" 
+                id="returnToStockAll"
+                checked={returnItemsState.every(r => r.returnToStock)}
+                onChange={e => {
+                  const val = e.target.checked;
+                  setReturnItemsState(returnItemsState.map(r => ({ ...r, returnToStock: val })));
+                }}
+                className="rounded border-input text-primary focus:ring-primary h-4 w-4"
+              />
+              <label htmlFor="returnToStockAll" className="text-sm font-medium leading-none cursor-pointer">
+                Return items to inventory stock
+              </label>
+            </div>
+
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground block mb-1.5">Refund Method</label>
+              <select
+                value={returnMethod}
+                onChange={e => setReturnMethod(e.target.value as any)}
+                className="w-full h-10 px-3 rounded-xl border border-input bg-background text-sm font-medium focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="cash">Cash</option>
+                <option value="pos">POS Terminal</option>
+                <option value="transfer">Bank Transfer</option>
+                <option value="store_credit">Store Credit</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex gap-3 mt-6">
+            <Button variant="outline" className="flex-1 h-12 rounded-xl font-bold" onClick={() => setReturnModalOpen(false)}>Cancel</Button>
+            <Button variant="hero" className="flex-1 h-12 rounded-xl font-bold bg-red-600 hover:bg-red-700 text-white shadow-soft" onClick={processReturnItems} disabled={refundingOrder}>
+              Process Return
             </Button>
           </div>
         </DialogContent>

@@ -20,6 +20,7 @@ export default function Reports() {
   
   // Data states
   const [inventoryData, setInventoryData] = useState<any[]>([]);
+  const [forecastData, setForecastData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
   useEffect(() => {
@@ -36,10 +37,15 @@ export default function Reports() {
           .order("name");
         
         setInventoryData(data || []);
+
+        const { data: forecast } = await supabase.rpc("get_inventory_forecast", { p_restaurant_id: restaurant.id });
+        setForecastData(forecast || []);
       } else {
         const { db } = await import("@/lib/offline/db");
         const rows = await db.products.where("restaurant_id").equals(restaurant.id).filter(r => !!r.track_inventory).sortBy("name");
         setInventoryData(rows as any[]);
+        // Forecasting requires historical sales data usually calculated on the server
+        setForecastData([]); 
       }
       setLoading(false);
     };
@@ -77,6 +83,20 @@ export default function Reports() {
     data: inventoryData
   };
 
+  const inventoryForecastConfig: ReportConfig<any> = {
+    title: "Inventory Forecasting & Depletion",
+    subtitle: `Location: ${restaurant?.name} | Date: ${format(new Date(), "MMM dd, yyyy")}`,
+    filename: "inventory_forecast",
+    columns: [
+      { header: "Product Name", accessorKey: "item_name" },
+      { header: "Current Stock", accessorKey: "current_stock" },
+      { header: "Avg Daily Sales (7d)", cell: (r) => Number(r.run_rate_7d).toFixed(2) },
+      { header: "Est. Days Remaining", cell: (r) => r.estimated_days_remaining !== null ? `${Number(r.estimated_days_remaining).toFixed(1)} days` : "Unknown" },
+      { header: "Status", cell: (r) => r.estimated_days_remaining !== null && r.estimated_days_remaining < 7 ? "⚠️ Low Stock Warning" : "Healthy" }
+    ],
+    data: forecastData
+  };
+
   const barcodeItems: BarcodeLabelProps[] = inventoryData
     .filter(i => i.barcode)
     .map(i => ({ barcode: i.barcode, name: i.name, price: i.price }));
@@ -99,6 +119,7 @@ export default function Reports() {
           <TabsList className="mb-4 flex flex-wrap h-auto">
             <TabsTrigger value="stock_count" className="gap-2"><FileText className="h-4 w-4" /> Stock Count Sheet</TabsTrigger>
             <TabsTrigger value="valuation" className="gap-2"><FileText className="h-4 w-4" /> Inventory Valuation</TabsTrigger>
+            <TabsTrigger value="forecast" className="gap-2"><FileText className="h-4 w-4" /> Forecasting</TabsTrigger>
             <TabsTrigger value="barcodes" className="gap-2"><Tags className="h-4 w-4" /> Barcode Labels</TabsTrigger>
           </TabsList>
           
@@ -108,6 +129,18 @@ export default function Reports() {
           
           <TabsContent value="valuation">
             {loading ? <CardGridSkeleton count={2} /> : <ReportViewer config={inventoryValuationConfig} />}
+          </TabsContent>
+
+          <TabsContent value="forecast">
+            {loading ? <CardGridSkeleton count={2} /> : (
+              isOffline ? (
+                <div className="text-center py-10 text-muted-foreground border rounded-xl border-dashed">
+                  Forecasting data requires server connectivity. Please connect to the internet.
+                </div>
+              ) : (
+                <ReportViewer config={inventoryForecastConfig} />
+              )
+            )}
           </TabsContent>
 
           <TabsContent value="barcodes">
@@ -136,6 +169,7 @@ export default function Reports() {
         <div className="hidden print:block w-full">
           {activeTab === "stock_count" && <ReportViewer config={stockCountConfig} onPrint={() => {}} />}
           {activeTab === "valuation" && <ReportViewer config={inventoryValuationConfig} onPrint={() => {}} />}
+          {activeTab === "forecast" && <ReportViewer config={inventoryForecastConfig} onPrint={() => {}} />}
           {activeTab === "barcodes" && <PrintBarcodeLabels items={barcodeItems} />}
         </div>
       </div>

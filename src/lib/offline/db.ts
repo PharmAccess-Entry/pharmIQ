@@ -48,7 +48,7 @@ export interface OfflineSale {
 export interface OfflineAction {
   id: string; // uuid
   restaurant_id: string;
-  type: 'SALE_CREATE' | 'SALE_UPDATE' | 'REFUND_CREATE' | 'STOCK_UPDATE' | 'EXPENSE_CREATE' | 'SHIFT_CREATE' | 'SHIFT_CLOSE' | 'PATIENT_CREATE' | 'PATIENT_UPDATE' | 'SUPPLIER_CREATE' | 'SUPPLIER_UPDATE' | 'PRODUCT_CREATE' | 'PRODUCT_UPDATE' | 'PRODUCT_DELETE' | 'TELEGRAM_NOTIFY';
+  type: 'SALE_CREATE' | 'SALE_UPDATE' | 'REFUND_CREATE' | 'STOCK_UPDATE' | 'EXPENSE_CREATE' | 'SHIFT_CREATE' | 'SHIFT_CLOSE' | 'PATIENT_CREATE' | 'PATIENT_UPDATE' | 'SUPPLIER_CREATE' | 'SUPPLIER_UPDATE' | 'PRODUCT_CREATE' | 'PRODUCT_UPDATE' | 'PRODUCT_DELETE' | 'TELEGRAM_NOTIFY' | 'CREDIT_TRANSACTION_CREATE' | 'RETURN_CREATE';
   payload: any;
   status: 'pending' | 'syncing' | 'failed' | 'conflict';
   attempts: number;
@@ -82,9 +82,44 @@ export interface OfflinePatient {
   allergies: string[];
   chronic_conditions: string[];
   last_visit?: string | null;
+  credit_limit?: number;
+  balance_due?: number;
   notes?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface OfflineCustomerTransaction {
+  id: string;
+  restaurant_id: string;
+  patient_id: string;
+  amount: number;
+  transaction_type: string;
+  order_id?: string | null;
+  created_by?: string | null;
+  notes?: string | null;
+  created_at: string;
+}
+
+export interface OfflineReturn {
+  id: string;
+  restaurant_id: string;
+  order_id: string;
+  staff_id?: string | null;
+  shift_id?: string | null;
+  refund_method: string;
+  total_refunded: number;
+  reason: string;
+  created_at: string;
+}
+
+export interface OfflineReturnItem {
+  id: string;
+  return_id: string;
+  order_item_id: string;
+  menu_item_id: string;
+  qty: number;
+  returned_to_stock: boolean;
 }
 
 export interface OfflineSupplier {
@@ -163,10 +198,13 @@ export class PharmIQOfflineDB extends Dexie {
   expenses!: Table<OfflineExpense, string>;
   shifts!: Table<OfflineShift, string>;
   inventory!: Table<OfflineInventory, string>;
+  customer_transactions!: Table<OfflineCustomerTransaction, string>;
+  returns!: Table<OfflineReturn, string>;
+  return_items!: Table<OfflineReturnItem, string>;
 
   constructor() {
     super('PharmIQOfflineDB');
-    this.version(3).stores({
+    this.version(4).stores({
       products: 'id, restaurant_id, category, barcode, name',
       sales: 'id, restaurant_id, created_at, status',
       offline_queue: 'id, restaurant_id, type, status, created_at',
@@ -176,7 +214,10 @@ export class PharmIQOfflineDB extends Dexie {
       suppliers: 'id, restaurant_id, name',
       expenses: 'id, restaurant_id, date, category',
       shifts: 'id, restaurant_id, user_id, status, start_time',
-      inventory: 'id, restaurant_id, menu_item_id, created_at'
+      inventory: 'id, restaurant_id, menu_item_id, created_at',
+      customer_transactions: 'id, restaurant_id, patient_id, transaction_type, created_at',
+      returns: 'id, restaurant_id, order_id, refund_method, created_at',
+      return_items: 'id, return_id, order_item_id, menu_item_id'
     });
   }
 }

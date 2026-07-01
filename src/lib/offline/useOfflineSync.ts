@@ -116,6 +116,14 @@ export const useOfflineSync = () => {
             });
             if (error) throw error;
         }
+        else if (item.type === 'CREDIT_TRANSACTION_CREATE') {
+            const { error } = await supabase.from('customer_transactions').insert(item.payload);
+            if (error) throw error;
+        }
+        else if (item.type === 'RETURN_CREATE') {
+            const { error } = await supabase.rpc('process_return', item.payload);
+            if (error) throw error;
+        }
 
         // Successfully synced, remove from queue
         await db.offline_queue.delete(item.id);

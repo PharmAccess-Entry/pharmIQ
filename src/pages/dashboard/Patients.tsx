@@ -20,6 +20,8 @@ type Patient = {
   allergies: string[];
   chronic_conditions: string[];
   last_visit?: string;
+  credit_limit?: number;
+  balance_due?: number;
 };
 
 export default function Patients() {
@@ -32,6 +34,9 @@ export default function Patients() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const { sendAlert } = useTelegramAlerts();
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentPatient, setPaymentPatient] = useState<Patient | null>(null);
 
   useEffect(() => {
     if (!restaurant?.id) return;
@@ -83,6 +88,8 @@ export default function Patients() {
     const phone = formData.get("phone") as string;
     const allergiesStr = formData.get("allergies") as string;
     const conditionsStr = formData.get("conditions") as string;
+    const creditLimitStr = formData.get("credit_limit") as string;
+    const credit_limit = creditLimitStr ? parseFloat(creditLimitStr.replace(/,/g, "")) : 0;
 
     const allergies = allergiesStr.split(",").map(s => s.trim()).filter(Boolean);
     const chronic_conditions = conditionsStr.split(",").map(s => s.trim()).filter(Boolean);
@@ -92,7 +99,7 @@ export default function Patients() {
     const { queueAction } = useOfflineQueue();
 
     if (selectedPatient) {
-      const updatedData = { name, phone, allergies, chronic_conditions };
+      const updatedData = { name, phone, allergies, chronic_conditions, credit_limit };
       if (navigator.onLine) {
         const { error } = await supabase
           .from("patients")
@@ -129,6 +136,8 @@ export default function Patients() {
         phone,
         allergies,
         chronic_conditions,
+        credit_limit,
+        balance_due: 0,
         created_at: now,
         updated_at: now,
       };
@@ -172,6 +181,74 @@ export default function Patients() {
   const openEdit = (p: Patient) => {
     setSelectedPatient(p);
     setOpenModal(true);
+  };
+
+  const openPayment = (e: React.MouseEvent, p: Patient) => {
+    e.stopPropagation();
+    setPaymentPatient(p);
+    setPaymentAmount(String(p.balance_due || 0));
+    setPaymentModalOpen(true);
+  };
+
+  const handlePayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!paymentPatient || !restaurant?.id) return;
+    setSaving(true);
+    
+    const amount = parseFloat(paymentAmount.replace(/,/g, ""));
+    if (isNaN(amount) || amount <= 0 || amount > (paymentPatient.balance_due || 0)) {
+      toast.error("Invalid amount. Must be between 1 and the current balance.");
+      setSaving(false);
+      return;
+    }
+
+    const { v4: uuidv4 } = await import("uuid");
+    const newId = uuidv4();
+    const now = new Date().toISOString();
+
+    const txPayload = {
+      id: newId,
+      restaurant_id: restaurant.id,
+      patient_id: paymentPatient.id,
+      amount: amount,
+      transaction_type: "payment",
+      created_by: (await supabase.auth.getUser()).data.user?.id,
+      notes: "Payment received towards balance",
+      created_at: now
+    };
+
+    const { db } = await import("@/lib/offline/db");
+    const { useOfflineQueue } = await import("@/lib/offline/useOfflineQueue");
+    const { queueAction } = useOfflineQueue();
+
+    if (navigator.onLine) {
+      const { error } = await supabase.rpc("process_credit_transaction", {
+        p_restaurant_id: txPayload.restaurant_id,
+        p_patient_id: txPayload.patient_id,
+        p_amount: txPayload.amount,
+        p_type: txPayload.transaction_type,
+        p_order_id: null,
+        p_staff_id: txPayload.created_by,
+        p_notes: txPayload.notes,
+        p_created_at: txPayload.created_at
+      });
+      if (error) {
+        toast.error("Payment failed");
+        setSaving(false);
+        return;
+      }
+    } else {
+      await queueAction(restaurant.id, "CREDIT_TRANSACTION_CREATE", txPayload);
+      await db.customer_transactions.add(txPayload as any);
+    }
+
+    const newBalance = Math.max((paymentPatient.balance_due || 0) - amount, 0);
+    await db.patients.update(paymentPatient.id, { balance_due: newBalance });
+    
+    setPatients(patients.map(p => p.id === paymentPatient.id ? { ...p, balance_due: newBalance } : p));
+    toast.success("Payment recorded successfully");
+    setPaymentModalOpen(false);
+    setSaving(false);
   };
 
   return (
@@ -246,11 +323,28 @@ export default function Patients() {
               )}
             </div>
 
-            <div className="mt-5 pt-4 border-t border-border/50 flex items-center justify-between text-xs text-muted-foreground">
-              <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> Last Visit:</span>
-              <span className="font-medium text-foreground">
-                {p.last_visit ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(new Date(p.last_visit)) : "New Patient"}
-              </span>
+            <div className="mt-5 pt-4 border-t border-border/50 flex flex-col gap-2">
+              {(p.credit_limit || 0) > 0 && (
+                <div className="flex items-center justify-between text-xs font-medium">
+                  <span className="text-muted-foreground">Credit Balance:</span>
+                  <div className="flex items-center gap-2">
+                    <span className={(p.balance_due || 0) > 0 ? "text-amber-500" : "text-green-500"}>
+                      ₦{(p.balance_due || 0).toLocaleString()} / ₦{(p.credit_limit || 0).toLocaleString()}
+                    </span>
+                    {(p.balance_due || 0) > 0 && (
+                      <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" onClick={(e) => openPayment(e, p)}>
+                        Pay
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span className="flex items-center gap-1"><Calendar className="w-3.5 h-3.5" /> Last Visit:</span>
+                <span className="font-medium text-foreground">
+                  {p.last_visit ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium" }).format(new Date(p.last_visit)) : "New Patient"}
+                </span>
+              </div>
             </div>
           </div>
         ))}
@@ -279,26 +373,84 @@ export default function Patients() {
             </div>
           )}
           <form onSubmit={handleSave} className="space-y-4 pt-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Full Name</Label>
-              <Input id="name" name="name" defaultValue={selectedPatient?.name} required placeholder="e.g. John Doe" />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="phone">Phone Number</Label>
-              <Input id="phone" name="phone" defaultValue={selectedPatient?.phone} required placeholder="080..." />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="allergies" className="text-destructive">Known Allergies (Comma separated)</Label>
-              <Input id="allergies" name="allergies" defaultValue={selectedPatient?.allergies.join(", ")} placeholder="e.g. Penicillin, Sulfa" />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="conditions" className="text-amber-500">Chronic Conditions (Comma separated)</Label>
-              <Input id="conditions" name="conditions" defaultValue={selectedPatient?.chronic_conditions.join(", ")} placeholder="e.g. Hypertension, Diabetes" />
+            <div className="max-h-[60vh] overflow-y-auto px-1 space-y-4 no-scrollbar">
+              <div className="space-y-2">
+                <Label htmlFor="name">Full Name</Label>
+                <Input id="name" name="name" defaultValue={selectedPatient?.name} required placeholder="e.g. John Doe" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="phone">Phone Number</Label>
+                <Input id="phone" name="phone" defaultValue={selectedPatient?.phone} required placeholder="080..." />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="allergies" className="text-destructive">Known Allergies (Comma separated)</Label>
+                <Input id="allergies" name="allergies" defaultValue={selectedPatient?.allergies.join(", ")} placeholder="e.g. Penicillin, Sulfa" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="conditions" className="text-amber-500">Chronic Conditions (Comma separated)</Label>
+                <Input id="conditions" name="conditions" defaultValue={selectedPatient?.chronic_conditions.join(", ")} placeholder="e.g. Hypertension, Diabetes" />
+              </div>
+              <div className="space-y-2 pt-2 border-t border-border/50">
+                <Label htmlFor="credit_limit" className="text-primary font-semibold">Store Credit Limit (₦)</Label>
+                <Input 
+                  id="credit_limit" 
+                  name="credit_limit" 
+                  type="text" 
+                  inputMode="numeric"
+                  defaultValue={selectedPatient?.credit_limit ? selectedPatient.credit_limit.toLocaleString() : ""} 
+                  onChange={e => {
+                    const val = e.target.value.replace(/,/g, "");
+                    if (!isNaN(Number(val))) {
+                      e.target.value = val ? Number(val).toLocaleString() : "";
+                    }
+                  }}
+                  placeholder="e.g. 50,000" 
+                />
+                <p className="text-[10px] text-muted-foreground">Set to 0 to disable credit sales for this patient.</p>
+              </div>
             </div>
             <DialogFooter className="pt-4">
               <Button type="button" variant="ghost" onClick={() => setOpenModal(false)} disabled={saving}>Cancel</Button>
               <Button type="submit" className="shadow-glow" disabled={saving}>
                 {saving ? "Saving..." : selectedPatient ? "Save Changes" : "Add Patient"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={paymentModalOpen} onOpenChange={setPaymentModalOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Receive Payment</DialogTitle>
+            <DialogDescription>Record a payment for {paymentPatient?.name}'s store credit balance.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handlePayment} className="space-y-4 pt-4">
+            <div className="bg-primary/5 border border-primary/10 rounded-lg p-3 text-sm mb-2">
+              <div className="flex justify-between mb-1">
+                <span className="text-muted-foreground">Current Balance:</span>
+                <span className="font-semibold text-amber-500">₦{(paymentPatient?.balance_due || 0).toLocaleString()}</span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="payment_amount">Amount Paid (₦)</Label>
+              <Input 
+                id="payment_amount" 
+                type="text" 
+                inputMode="numeric"
+                value={paymentAmount} 
+                onChange={e => {
+                  const val = e.target.value.replace(/,/g, "");
+                  if (!isNaN(Number(val))) {
+                    setPaymentAmount(val ? Number(val).toLocaleString() : "");
+                  }
+                }} 
+                required 
+              />
+            </div>
+            <DialogFooter className="pt-4">
+              <Button type="button" variant="ghost" onClick={() => setPaymentModalOpen(false)} disabled={saving}>Cancel</Button>
+              <Button type="submit" className="shadow-glow" disabled={saving}>
+                {saving ? "Processing..." : "Confirm Payment"}
               </Button>
             </DialogFooter>
           </form>

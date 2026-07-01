@@ -48,7 +48,7 @@ type MenuItem = {
 };
 
 type CartItem = MenuItem & { cartItemId: string; qty: number; item_intent: "take-away" | "eat-here"; notes?: string };
-type PaymentMethod = "cash" | "pos_terminal" | "bank_transfer";
+type PaymentMethod = "cash" | "pos_terminal" | "bank_transfer" | "credit";
 type PendingTransfer = {
   orderId: string;
   shortCode: string;
@@ -411,7 +411,7 @@ export default function PosMode() {
   const [barcodeBuffer, setBarcodeBuffer] = useState("");
   const [manualBarcode, setManualBarcode] = useState("");
   const barcodeTimeoutRef = useRef<any>(null);
-  const [patients, setPatients] = useState<{ id: string; name: string; phone: string }[]>([]);
+  const [patients, setPatients] = useState<{ id: string; name: string; phone: string; credit_limit?: number; balance_due?: number }[]>([]);
 
   const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const change = cashGiven - total;
@@ -964,9 +964,26 @@ export default function PosMode() {
                         <CommandItem
                           key={p.id}
                           value={p.name + " " + p.phone}
-                          onSelect={() => {
+                          onSelect={async () => {
                             setPatientId(p.id);
                             setPatientPopoverOpen(false);
+                            if (navigator.onLine) {
+                              const { data } = await supabase
+                                .from("patients")
+                                .select("id, name, phone, credit_limit, balance_due")
+                                .eq("restaurant_id", restaurant.id)
+                                .order("name");
+                              if (data) {
+                                setPatients(data);
+                                const { db } = await import("@/lib/offline/db");
+                                await db.patients.where("restaurant_id").equals(restaurant.id).delete();
+                                await db.patients.bulkPut(data as any[]);
+                              }
+                            } else {
+                              const { db } = await import("@/lib/offline/db");
+                              const rows = await db.patients.where("restaurant_id").equals(restaurant.id).sortBy("name");
+                              setPatients(rows as any[]);
+                            }
                           }}
                         >
                           <Check className={`mr-2 h-4 w-4 ${patientId === p.id ? "opacity-100" : "opacity-0"}`} />
@@ -1284,16 +1301,41 @@ export default function PosMode() {
                 <CreditCard className="h-5 w-5 text-primary" />
                 <span className="font-semibold text-xs text-center">POS Terminal</span>
               </button>
-              <button
-                onClick={() => setPaymentMethod("bank_transfer")}
-                className={`flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all ${
+              <div 
+                className={`relative flex flex-col items-center justify-center p-4 rounded-xl border-2 cursor-pointer transition-all ${
                   paymentMethod === "bank_transfer" ? "border-primary bg-primary-soft" : "border-border hover:border-primary/50"
                 }`}
+                onClick={() => setPaymentMethod("bank_transfer")}
               >
-                <RotateCcw className="h-5 w-5 text-primary" />
-                <span className="font-semibold text-xs text-center">Transfer</span>
-              </button>
+                <QrCode className="h-6 w-6 mb-2 text-foreground" />
+                <span className="font-semibold text-sm">Transfer</span>
+              </div>
+              <div 
+                className={`relative flex flex-col items-center justify-center p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                  !patientId || patientId === "none" ? "opacity-50 cursor-not-allowed bg-muted/50" : paymentMethod === "credit" ? "border-primary bg-primary-soft" : "border-border hover:border-primary/50"
+                }`}
+                onClick={() => { if (patientId && patientId !== "none") setPaymentMethod("credit"); }}
+              >
+                <div className="h-6 w-6 mb-2 text-foreground flex items-center justify-center text-xl font-bold">₦</div>
+                <span className="font-semibold text-sm">Credit</span>
+              </div>
             </div>
+
+            {paymentMethod === "credit" && patientId && patientId !== "none" && (
+              <div className="bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 p-3 rounded-lg text-sm mb-4">
+                {(() => {
+                   const pat = patients.find(p => p.id === patientId);
+                   if (!pat) return "Patient not found.";
+                   const bal = Number(pat.balance_due || 0);
+                   const limit = Number(pat.credit_limit || 0);
+                   const newBal = bal + total;
+                   if (newBal > limit) {
+                     return <div className="text-red-600 dark:text-red-400 font-bold">⚠️ Credit limit exceeded! Limit: {getCurrencySymbol()}{limit.toLocaleString()}, New Balance would be: {getCurrencySymbol()}{newBal.toLocaleString()}. Cannot proceed.</div>;
+                   }
+                   return <div>Available Credit: <b>{getCurrencySymbol()}{(limit - bal).toLocaleString()}</b>. New balance will be <b>{getCurrencySymbol()}{newBal.toLocaleString()}</b>.</div>;
+                })()}
+              </div>
+            )}
 
             {/* Cash calculator */}
             {paymentMethod === "cash" && (
@@ -1343,14 +1385,21 @@ export default function PosMode() {
               </div>
             )}
 
-            <Button
-              className="w-full gap-2 font-bold"
-              size="lg"
-              disabled={placing || (paymentMethod === "cash" && cashGiven > 0 && cashGiven < total)}
+            <Button 
+              size="lg" 
+              className="w-full font-bold h-14 text-lg" 
               onClick={placeOrder}
+              disabled={
+                placing || 
+                (paymentMethod === "cash" && cashGiven > 0 && cashGiven < total) ||
+                (paymentMethod === "credit" && (() => {
+                   const pat = patients.find(p => p.id === patientId);
+                   return !pat || (Number(pat.balance_due || 0) + total > Number(pat.credit_limit || 0));
+                })())
+              }
             >
               {placing ? (
-                <><span className="animate-spin">⏳</span> Processing...</>
+                <><span className="animate-spin mr-2">⏳</span> Processing...</>
               ) : paymentMethod === "bank_transfer" ? (
                 <><Clock className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">Park &amp; Wait for Transfer</span><span className="sm:hidden">Park Order</span></>
               ) : (
@@ -1622,7 +1671,7 @@ export default function PosMode() {
               )}
               <div className="flex justify-between text-xs text-muted-foreground">
                 <span>Payment</span>
-                <span>{successOrder?.paymentMethod === "cash" ? "Cash" : successOrder?.paymentMethod === "pos_terminal" ? "POS Terminal" : "Bank Transfer"}</span>
+                <span>{successOrder?.paymentMethod === "cash" ? "Cash" : successOrder?.paymentMethod === "bank_transfer" ? "Bank Transfer" : successOrder?.paymentMethod === "credit" ? "Credit (Pay Later)" : "POS Terminal"}</span>
               </div>
               {successOrder?.paymentMethod === "cash" && (successOrder?.cashGiven || 0) > 0 && (
                 <div className="flex justify-between text-xs font-semibold text-green-600 dark:text-green-400">
