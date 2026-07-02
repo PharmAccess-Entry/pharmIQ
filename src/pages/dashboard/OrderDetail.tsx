@@ -303,11 +303,13 @@ export const OrderDetail = () => {
         setRefundingOrder(false);
         return;
       }
+      setOrder(prev => prev ? { ...prev, status: "refunded" } : null);
     } else {
       const { db } = await import("@/lib/offline/db");
       const { useOfflineQueue } = await import("@/lib/offline/useOfflineQueue");
       const { queueAction } = useOfflineQueue();
       await queueAction(order.restaurant_id, "RETURN_CREATE", txPayload);
+      setOrder(prev => prev ? { ...prev, status: "refunded" } : null);
     }
 
     toast.success("Return processed successfully.");
