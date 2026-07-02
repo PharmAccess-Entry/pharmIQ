@@ -1282,10 +1282,11 @@ export default function PosMode() {
             </div>
 
             {/* Payment method */}
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <button
+                type="button"
                 onClick={() => setPaymentMethod("cash")}
-                className={`flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all ${
+                className={`flex flex-col items-center justify-center gap-2 p-3 rounded-xl border-2 transition-all ${
                   paymentMethod === "cash" ? "border-primary bg-primary-soft" : "border-border hover:border-primary/50"
                 }`}
               >
@@ -1293,32 +1294,36 @@ export default function PosMode() {
                 <span className="font-semibold text-xs text-center">Cash</span>
               </button>
               <button
+                type="button"
                 onClick={() => setPaymentMethod("pos_terminal")}
-                className={`flex flex-col items-center gap-2 p-3 rounded-xl border-2 transition-all ${
+                className={`flex flex-col items-center justify-center gap-2 p-3 rounded-xl border-2 transition-all ${
                   paymentMethod === "pos_terminal" ? "border-primary bg-primary-soft" : "border-border hover:border-primary/50"
                 }`}
               >
                 <CreditCard className="h-5 w-5 text-primary" />
                 <span className="font-semibold text-xs text-center">POS Terminal</span>
               </button>
-              <div 
-                className={`relative flex flex-col items-center justify-center p-4 rounded-xl border-2 cursor-pointer transition-all ${
+              <button
+                type="button"
+                className={`relative flex flex-col items-center justify-center p-3 rounded-xl border-2 cursor-pointer transition-all ${
                   paymentMethod === "bank_transfer" ? "border-primary bg-primary-soft" : "border-border hover:border-primary/50"
                 }`}
                 onClick={() => setPaymentMethod("bank_transfer")}
               >
-                <QrCode className="h-6 w-6 mb-2 text-foreground" />
-                <span className="font-semibold text-sm">Transfer</span>
-              </div>
-              <div 
-                className={`relative flex flex-col items-center justify-center p-4 rounded-xl border-2 cursor-pointer transition-all ${
-                  !patientId || patientId === "none" ? "opacity-50 cursor-not-allowed bg-muted/50" : paymentMethod === "credit" ? "border-primary bg-primary-soft" : "border-border hover:border-primary/50"
+                <QrCode className="h-5 w-5 mb-1 text-foreground" />
+                <span className="font-semibold text-xs text-center">Transfer</span>
+              </button>
+              <button
+                type="button"
+                className={`relative flex flex-col items-center justify-center p-3 rounded-xl border-2 transition-all ${
+                  !patientId || patientId === "none" ? "opacity-50 cursor-not-allowed bg-muted/50" : paymentMethod === "credit" ? "border-primary bg-primary-soft" : "border-border hover:border-primary/50 cursor-pointer"
                 }`}
                 onClick={() => { if (patientId && patientId !== "none") setPaymentMethod("credit"); }}
+                disabled={!patientId || patientId === "none"}
               >
-                <div className="h-6 w-6 mb-2 text-foreground flex items-center justify-center text-xl font-bold">₦</div>
-                <span className="font-semibold text-sm">Credit</span>
-              </div>
+                <div className="h-5 w-5 mb-1 text-foreground flex items-center justify-center text-lg font-bold">₦</div>
+                <span className="font-semibold text-xs text-center">Credit</span>
+              </button>
             </div>
 
             {paymentMethod === "credit" && patientId && patientId !== "none" && (
