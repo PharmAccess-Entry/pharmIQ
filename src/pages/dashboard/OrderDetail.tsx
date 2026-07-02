@@ -3,7 +3,7 @@ import { useRestaurant } from "@/lib/restaurant";
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Check, X, Minus, Plus, AlertTriangle, Printer, Download } from "lucide-react";
+import { ArrowLeft, Check, X, Minus, Plus, AlertTriangle, Printer, Download, Banknote, CreditCard, Building2, Gift } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { StatusPill } from "./Dashboard";
 import { supabase } from "@/integrations/supabase/client";
@@ -16,6 +16,7 @@ import html2canvas from "html2canvas";
 import { useRef } from "react";
 import { useOfflineStatus } from "@/lib/useOfflineStatus";
 import { WifiOff } from "lucide-react";
+
 
 type Order = any;
 type OrderItem = { id: string; name: string; qty: number; returned_qty?: number; price: number; item_intent: string | null; selected_option: string | null; notes: string | null; bundle_id?: string | null; menu_item_id: string; };
@@ -738,17 +739,29 @@ export const OrderDetail = () => {
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-muted-foreground block mb-1.5">Refund Method</label>
-              <select
-                value={returnMethod}
-                onChange={e => setReturnMethod(e.target.value as any)}
-                className="w-full h-10 px-3 rounded-xl border border-input bg-background text-sm font-medium focus:outline-none focus:ring-1 focus:ring-primary"
-              >
-                <option value="cash">Cash</option>
-                <option value="pos">POS Terminal</option>
-                <option value="transfer">Bank Transfer</option>
-                <option value="store_credit">Store Credit</option>
-              </select>
+              <label className="text-xs font-semibold text-muted-foreground block mb-2">Refund Method</label>
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  { value: "cash",         label: "Cash",          icon: Banknote },
+                  { value: "pos",          label: "POS Terminal",  icon: CreditCard },
+                  { value: "transfer",     label: "Bank Transfer", icon: Building2 },
+                  { value: "store_credit", label: "Store Credit",  icon: Gift },
+                ] as const).map(({ value, label, icon: Icon }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setReturnMethod(value as any)}
+                    className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border-2 text-sm font-semibold transition-all ${
+                      returnMethod === value
+                        ? "border-primary bg-primary/10 text-primary"
+                        : "border-border bg-transparent hover:border-primary/40 text-foreground"
+                    }`}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 

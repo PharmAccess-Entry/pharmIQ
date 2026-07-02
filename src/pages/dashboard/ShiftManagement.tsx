@@ -140,6 +140,24 @@ export default function ShiftManagement() {
     }
   }, [rid]);
 
+  // Auto-settle: settle all completed shifts older than 24 hours silently
+  const autoSettleStaleShifts = useCallback(async (loadedShifts: any[]) => {
+    if (!rid || !navigator.onLine) return;
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const stale = loadedShifts.filter(
+      s => s.status === "completed" && new Date(s.end_time || s.start_time).getTime() < oneDayAgo
+    );
+    if (stale.length === 0) return;
+    const { error } = await supabase
+      .from("shifts")
+      .update({ status: "settled", settled_at: new Date().toISOString(), settled_by: user?.id })
+      .in("id", stale.map(s => s.id));
+    if (!error) {
+      toast.info(`${stale.length} old shift${stale.length > 1 ? "s" : ""} auto-settled (>24h old).`);
+      fetchShifts();
+    }
+  }, [rid, user?.id, fetchShifts]);
+
   useEffect(() => {
     fetchShifts();
     const handler = () => fetchShifts();
@@ -147,8 +165,16 @@ export default function ShiftManagement() {
     return () => window.removeEventListener("pharmiq_sync_complete", handler);
   }, [fetchShifts]);
 
-  const handleSettle = async () => {
-    if (!settlingShift) return;
+  // Trigger auto-settle when shifts are loaded
+  useEffect(() => {
+    if (!loading && shifts.length > 0) {
+      autoSettleStaleShifts(shifts);
+    }
+  }, [loading, shifts, autoSettleStaleShifts]);
+
+  const handleSettle = async (shiftToSettle?: any) => {
+    const target = shiftToSettle || settlingShift;
+    if (!target) return;
     setSettleLoading(true);
     try {
       const { error } = await supabase
@@ -158,13 +184,33 @@ export default function ShiftManagement() {
           settled_at: new Date().toISOString(),
           settled_by: user?.id,
         })
-        .eq("id", settlingShift.id);
+        .eq("id", target.id);
       if (error) throw error;
-      toast.success(`Shift settled — cash received from ${staffNames[settlingShift.user_id] || "Staff"}.`);
-      setSettlingShift(null);
+      if (!shiftToSettle) {
+        toast.success(`Shift settled — cash received from ${staffNames[target.user_id] || "Staff"}.`);
+        setSettlingShift(null);
+      }
       fetchShifts();
     } catch (e: any) {
       toast.error("Failed to settle shift: " + e.message);
+    } finally {
+      setSettleLoading(false);
+    }
+  };
+
+  const handleSettleAll = async () => {
+    if (!completedShifts.length) return;
+    setSettleLoading(true);
+    try {
+      const { error } = await supabase
+        .from("shifts")
+        .update({ status: "settled", settled_at: new Date().toISOString(), settled_by: user?.id })
+        .in("id", completedShifts.map(s => s.id));
+      if (error) throw error;
+      toast.success(`All ${completedShifts.length} shifts settled successfully.`);
+      fetchShifts();
+    } catch (e: any) {
+      toast.error("Failed to settle all shifts: " + e.message);
     } finally {
       setSettleLoading(false);
     }
@@ -335,10 +381,24 @@ export default function ShiftManagement() {
 
         {/* Completed Shifts — Awaiting Admin Settlement */}
         <div className="space-y-3">
-          <h2 className="text-lg font-bold flex items-center gap-2">
-            <AlertTriangle className="h-5 w-5 text-amber-500" />
-            Awaiting Settlement ({completedShifts.length})
-          </h2>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h2 className="text-lg font-bold flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              Awaiting Settlement ({completedShifts.length})
+            </h2>
+            {isAdmin && completedShifts.length > 1 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 font-semibold text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10"
+                disabled={settleLoading}
+                onClick={handleSettleAll}
+              >
+                <BadgeCheck className="h-4 w-4" />
+                Settle All ({completedShifts.length})
+              </Button>
+            )}
+          </div>
           {loading ? (
             <ListRowSkeleton count={3} />
           ) : completedShifts.length === 0 ? (
