@@ -17,7 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import {
   Plus, Minus, Trash2, ShoppingCart, Printer, Download, X,
   Banknote, CreditCard, CheckCircle2, Search, UtensilsCrossed,
-  User, RotateCcw, Monitor, ChevronUp, Clock, LogOut, AlertCircle, Scan, Shield, Check, ChevronsUpDown
+  User, RotateCcw, Monitor, ChevronUp, Clock, LogOut, AlertCircle, Scan, Shield, Check, ChevronsUpDown, QrCode
 } from "lucide-react";
 import html2canvas from "html2canvas";
 import { DashboardLayout } from "@/components/DashboardLayout";
