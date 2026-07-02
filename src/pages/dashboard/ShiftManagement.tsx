@@ -40,6 +40,7 @@ export default function ShiftManagement() {
 
   // Settlement dialog state
   const [settlingShift, setSettlingShift] = useState<any | null>(null);
+  const [settleAllConfirming, setSettleAllConfirming] = useState(false);
   const [selectedShiftDetails, setSelectedShiftDetails] = useState<any | null>(null);
   const [settleLoading, setSettleLoading] = useState(false);
 
@@ -208,6 +209,7 @@ export default function ShiftManagement() {
         .in("id", completedShifts.map(s => s.id));
       if (error) throw error;
       toast.success(`All ${completedShifts.length} shifts settled successfully.`);
+      setSettleAllConfirming(false);
       fetchShifts();
     } catch (e: any) {
       toast.error("Failed to settle all shifts: " + e.message);
@@ -392,7 +394,7 @@ export default function ShiftManagement() {
                 variant="outline"
                 className="gap-1.5 font-semibold text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10"
                 disabled={settleLoading}
-                onClick={handleSettleAll}
+                onClick={() => setSettleAllConfirming(true)}
               >
                 <BadgeCheck className="h-4 w-4" />
                 Settle All ({completedShifts.length})
@@ -744,6 +746,26 @@ export default function ShiftManagement() {
             <Button variant="outline" onClick={() => setForceClosingShift(null)}>Cancel</Button>
             <Button variant="destructive" onClick={handleForceClose} disabled={forceCloseLoading} className="font-bold gap-1.5">
               {forceCloseLoading ? "Closing..." : "Force Close Shift"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Settle All Confirmation Dialog */}
+      <Dialog open={settleAllConfirming} onOpenChange={setSettleAllConfirming}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-emerald-600">
+              <BadgeCheck className="h-5 w-5" /> Settle All Shifts
+            </DialogTitle>
+            <DialogDescription>
+              Are you sure you want to settle all {completedShifts.length} awaiting shifts? This confirms you have received all the stated cash variances.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 mt-4 sm:justify-start">
+            <Button variant="outline" onClick={() => setSettleAllConfirming(false)}>Cancel</Button>
+            <Button className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold" onClick={handleSettleAll} disabled={settleLoading}>
+              {settleLoading ? "Settling..." : "Yes, Settle All"}
             </Button>
           </DialogFooter>
         </DialogContent>
